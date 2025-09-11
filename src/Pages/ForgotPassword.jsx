@@ -11,6 +11,7 @@ export default function ForgotPassword() {
   const handleSubmit = async (e) => {
     e.preventDefault();
 
+    // ✅ Check confirm password
     if (password !== confirmPassword) {
       setError("❌ Passwords do not match");
       setMessage("");
@@ -18,12 +19,20 @@ export default function ForgotPassword() {
     }
 
     setError("");
+    setMessage("");
 
     try {
       const response = await fetch(
-        `http://localhost:8080/api/users/forgot-password?username=${username}&newPassword=${password}`,
+        "http://localhost:8080/api/users/forgot-password",
         {
-          method: "PUT",
+          method: "PUT", // ✅ matches backend
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            username: username,
+            newPassword: password,
+          }),
         }
       );
 
@@ -35,12 +44,10 @@ export default function ForgotPassword() {
         setConfirmPassword("");
       } else {
         const errorText = await response.text();
-        setError(errorText);
-        setMessage("");
+        setError(errorText || "❌ Something went wrong");
       }
     } catch (err) {
       setError("⚠️ Server error. Please try again later.");
-      setMessage("");
     }
   };
 
@@ -62,7 +69,7 @@ export default function ForgotPassword() {
             {/* Username */}
             <input
               type="text"
-              placeholder="Username"
+              placeholder="Enter Username"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none mb-4"
@@ -97,7 +104,7 @@ export default function ForgotPassword() {
 
             <button
               type="submit"
-              className="w-full bg-red-600 hover:bg-red-700 text-white py-2 rounded-lg transition"
+              className="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg transition"
             >
               Reset Password
             </button>
