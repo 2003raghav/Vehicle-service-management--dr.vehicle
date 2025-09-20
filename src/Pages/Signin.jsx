@@ -17,7 +17,7 @@ export default function Signin() {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ username: username, password }),
+        body: JSON.stringify({ username, password }),
       });
 
       if (!response.ok) {
@@ -27,8 +27,12 @@ export default function Signin() {
       const data = await response.json();
       console.log("Login Success:", data);
 
-      // Redirect after successful login
-      navigate("/dashboard");
+      // ✅ Save token and username
+      localStorage.setItem("token", data.token);
+      localStorage.setItem("username", data.username);
+
+      // Redirect to profile page
+      navigate("/profile");
     } catch (err) {
       setError(err.message);
     }
@@ -82,10 +86,10 @@ export default function Signin() {
           </form>
 
           <div className="flex justify-between mt-4 text-sm">
-            <Link to="/new-registration" className="text-success hover:underline text-decoration-none">
+            <Link to="/new-registration" className="text-blue-600 hover:underline">
               New Registration
             </Link>
-            <Link to="/forgot-password" className="text-danger hover:underline text-decoration-none">
+            <Link to="/forgot-password" className="text-red-600 hover:underline">
               Forgot Password?
             </Link>
           </div>
