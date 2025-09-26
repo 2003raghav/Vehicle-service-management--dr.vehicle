@@ -1,6 +1,6 @@
 import { Link, useNavigate } from "react-router-dom";
 import { useState, useRef, useEffect } from "react";
-import { Menu, X, Search, Home, Wrench, User, LogIn, Info, HelpCircle, Phone, Settings, LogOut, } from "lucide-react";
+import { Menu, X, Search, Home, Wrench, User, LogIn, Info, HelpCircle, Phone, Settings, LogOut, MessageCircle, FilePen, } from "lucide-react";
 import SearchBar from "./SearchBar";
 
 export default function Navbar() { 
@@ -44,6 +44,8 @@ export default function Navbar() {
     { to: "/contactus", label: "Contact Support", icon: Phone },
     { to: "/faq", label: "FAQ", icon: HelpCircle },
     { to: "/settings", label: "Settings", icon: Settings },
+    { to: "/chat", label: "Chat", icon: MessageCircle },
+    { to: "/feedback", label: "Feedback", icon: FilePen },
   ];
 
   const cleanLink = "link-clean no-underline hover:no-underline focus:no-underline active:no-underline visited:no-underline";

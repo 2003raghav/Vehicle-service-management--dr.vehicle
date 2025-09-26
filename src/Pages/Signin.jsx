@@ -86,10 +86,10 @@ export default function Signin() {
           </form>
 
           <div className="flex justify-between mt-4 text-sm">
-            <Link to="/new-registration" className="text-blue-600 hover:underline">
+            <Link to="/new-registration" className="text-blue-600 hover:underline text-success"  style={{textDecoration:"none"}}>
               New Registration
             </Link>
-            <Link to="/forgot-password" className="text-red-600 hover:underline">
+            <Link to="/forgot-password" className="text-red-600 hover:underline text-danger" style={{textDecoration:"none"}}>
               Forgot Password?
             </Link>
           </div>
