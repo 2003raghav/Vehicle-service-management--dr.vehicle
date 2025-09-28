@@ -1,11 +1,48 @@
-import { Link } from "react-router-dom";
+import { useState } from "react";
+import { useNavigate, Link } from "react-router-dom";
+import axios from "axios";
 import vehicleImg from "../../assets/Components/Vehicleimg.jpg";
 
 export default function Signin() {
+  const navigate = useNavigate();
+
+  const [ownername, setOwnername] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError("");
+
+    try {
+      const response = await axios.post("http://localhost:8080/provider/login", {
+        ownername,
+        password
+      });
+
+      if (response.status === 200) {
+        alert("✅ Login successful!");
+        // Save token or user info if backend returns any (optional)
+        // localStorage.setItem("token", response.data.token);
+
+        // Redirect to dashboard or home page
+        navigate("/providerDashboard");
+      } else {
+        setError("❌ Invalid credentials");
+      }
+    } catch (err) {
+      console.error(err);
+      if (err.response && err.response.status === 401) {
+        setError("❌ Invalid ownername or password");
+      } else {
+        setError("❌ Server error, try again later");
+      }
+    }
+  };
+
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-purple-100 via-pink-100 to-indigo-100 p-6">
       <div className="bg-white/90 backdrop-blur-md shadow-2xl rounded-2xl w-full max-w-md overflow-hidden border border-gray-200">
-        
         {/* Top Banner */}
         <div className="relative">
           <img src={vehicleImg} alt="Sign In" className="w-full h-40 object-cover" />
@@ -18,18 +55,19 @@ export default function Signin() {
 
         {/* Form Section */}
         <div className="p-6 md:p-8">
-          <form className="space-y-6">
-            
-            {/* Username */}
+          <form className="space-y-6" onSubmit={handleSubmit}>
+            {/* Ownername */}
             <div>
-              <label htmlFor="username" className="block text-sm font-medium text-gray-700 mb-1">
-                Username
+              <label htmlFor="ownername" className="block text-sm font-medium text-gray-700 mb-1">
+                Ownername
               </label>
               <input
-                id="username"
+                id="ownername"
                 type="text"
                 className="input-stylish"
                 placeholder="Enter your username"
+                value={ownername}
+                onChange={(e) => setOwnername(e.target.value)}
                 required
               />
             </div>
@@ -44,9 +82,14 @@ export default function Signin() {
                 type="password"
                 className="input-stylish"
                 placeholder="Enter your password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
                 required
               />
             </div>
+
+            {/* Error Message */}
+            {error && <p className="text-red-600 text-sm">{error}</p>}
 
             {/* Sign In Button */}
             <button
@@ -59,10 +102,10 @@ export default function Signin() {
 
           {/* Links */}
           <div className="flex justify-between mt-6 text-sm">
-            <Link to="/providerSignup" className="text-purple-600 hover:underline">
+            <Link to="/providerSignup" className="text-purple-600 hover:underline text-success" style={{textDecoration:"none"}}>
               New Registration
             </Link>
-            <Link to="/forgot-password" className="text-purple-600 hover:underline" style={{textDecoration:"none"}}>
+            <Link to="/provider/forget-password" className="text-purple-600 hover:underline text-danger" style={{textDecoration:"none"}}>
               Forgot Password?
             </Link>
           </div>
@@ -70,25 +113,23 @@ export default function Signin() {
       </div>
 
       {/* Custom Input Style */}
-      <style>
-        {`
-          .input-stylish {
-            width: 100%;
-            padding: 0.8rem 1rem;
-            border: 1px solid #d1d5db;
-            border-radius: 0.75rem;
-            background: #f9fafb;
-            box-shadow: inset 0 1px 2px rgba(0,0,0,0.05);
-            transition: all 0.3s ease;
-          }
-          .input-stylish:focus {
-            outline: none;
-            border-color: #a855f7;
-            box-shadow: 0 0 8px rgba(168, 85, 247, 0.4);
-            background: #fff;
-          }
-        `}
-      </style>
+      <style>{`
+        .input-stylish {
+          width: 100%;
+          padding: 0.8rem 1rem;
+          border: 1px solid #d1d5db;
+          border-radius: 0.75rem;
+          background: #f9fafb;
+          box-shadow: inset 0 1px 2px rgba(0,0,0,0.05);
+          transition: all 0.3s ease;
+        }
+        .input-stylish:focus {
+          outline: none;
+          border-color: #a855f7;
+          box-shadow: 0 0 8px rgba(168, 85, 247, 0.4);
+          background: #fff;
+        }
+      `}</style>
     </div>
   );
 }

@@ -19,6 +19,7 @@ import Chat from './assets/Chat';
 import ProviderSignup from './Pages/Provider/ProviderSignup';
 import ProviderLogin from './Pages/Provider/ProviderLogin';
 import FeedbackForm from './assets/FeedbackForm';
+import ProviderForgotPassword from './Pages/Provider/ProviderForgotPassword';
 
 export default function App() {
   return (
@@ -44,6 +45,7 @@ export default function App() {
           <Route path="/providerSignup" element={<ProviderSignup />} />
           <Route path="/providerLogin" element={<ProviderLogin />} />
           <Route path="/feedback" element={<FeedbackForm />} />
+          <Route path="/provider/forget-password" element={<ProviderForgotPassword />} />
         </Routes>
         <Chat />
       </main>

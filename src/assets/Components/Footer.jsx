@@ -17,11 +17,11 @@ export default function Footer() {
         {/* Column 2 - Quick Links */}
         <div>
           <h3 className="text-lg font-semibold text-white mb-3">Quick Links</h3>
-          <ul className="space-y-2 text-sm">
-            <li><a href="/" className="hover:text-blue-400">Home</a></li>
-            <li><a href="/services" className="hover:text-blue-400">Services</a></li>
-            <li><a href="/signin" className="hover:text-blue-400">Provider Signup</a></li>
-            <li><a href="/contactus" className="hover:text-blue-400">Contact Us</a></li>
+          <ul className="space-y-2 text-sm" >
+            <li><a href="/" className="hover:text-blue-400"style={{textDecoration: 'none'}}>Home</a></li>
+            <li><a href="/services" className="hover:text-blue-400"style={{textDecoration: 'none'}}>Services</a></li>
+            <li><a href="/providerLogin" className="hover:text-blue-400"style={{textDecoration: 'none'}}>Provider Signup</a></li>
+            <li><a href="/contactus" className="hover:text-blue-400"style={{textDecoration: 'none'}}>Contact Us</a></li>
           </ul>
         </div>
 
@@ -29,10 +29,10 @@ export default function Footer() {
         <div>
           <h3 className="text-lg font-semibold text-white mb-3">Support</h3>
           <ul className="space-y-2 text-sm">
-            <li><a href="/faq" className="hover:text-blue-400">FAQ</a></li>
-            <li><a href="/signin" className="hover:text-blue-400">Sign In</a></li>
-            <li><a href="/new-registration" className="hover:text-blue-400">Register</a></li>
-            <li><a href="/forgot-password" className="hover:text-blue-400">Forgot Password</a></li>
+            <li><a href="/faq" className="hover:text-blue-400"style={{textDecoration: 'none'}}>FAQ</a></li>
+            <li><a href="/signin" className="hover:text-blue-400"style={{textDecoration: 'none'}}>Sign In</a></li>
+            <li><a href="/new-registration" className="hover:text-blue-400"style={{textDecoration: 'none'}}>Register</a></li>
+            <li><a href="/forgot-password" className="hover:text-blue-400"style={{textDecoration: 'none'}}>Forgot Password</a></li>
           </ul>
         </div>
 
@@ -50,7 +50,7 @@ export default function Footer() {
 
       {/* Bottom Bar */}
       <div className="border-t border-gray-700 text-center py-4 text-sm">
-        © {new Date().getFullYear()} QnA Auto. All Rights Reserved.
+        © {new Date().getFullYear()} QnA Auto. All Rights Reserved @MVJ Boys.
       </div>
     </footer>
   );

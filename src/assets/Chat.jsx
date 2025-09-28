@@ -25,7 +25,7 @@ export default function Chatbot() {
     oil: [
       "For an oil change, we recommend every 5,000 miles or 6 months.",
       "Most vehicles need an oil change every 5,000–7,500 miles. What's your vehicle make?",
-      "Regular oil changes help extend engine life. Specials start at $39.99!",
+      "Regular oil changes help extend engine life. Specials start at Rs.500!",
     ],
     brake: [
       "Brake service is crucial for safety. Squeaking means inspection is due.",
@@ -44,7 +44,7 @@ export default function Chatbot() {
     ],
     pricing: [
       "Prices vary by service and vehicle. Could you specify?",
-      "We offer competitive pricing. Many services start under $50.",
+      "We offer competitive pricing. Many services start under Rs.3000.",
       "Give me your vehicle details and service type, I'll estimate it.",
     ],
     default: [
