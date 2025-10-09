@@ -19,7 +19,8 @@ import Chat from './assets/Chat';
 import ProviderSignup from './Pages/Provider/ProviderSignup';
 import ProviderLogin from './Pages/Provider/ProviderLogin';
 import FeedbackForm from './assets/FeedbackForm';
-import ProviderForgotPassword from './Pages/Provider/ProviderForgotPassword';
+import VehicleStatusDashboard from './Pages/Customer/VehicleStatusDashboard';
+import ListGarage from './assets/Components/ListGarage';
 
 export default function App() {
   return (
@@ -45,7 +46,8 @@ export default function App() {
           <Route path="/providerSignup" element={<ProviderSignup />} />
           <Route path="/providerLogin" element={<ProviderLogin />} />
           <Route path="/feedback" element={<FeedbackForm />} />
-          <Route path="/provider/forget-password" element={<ProviderForgotPassword />} />
+          <Route path="/serviceStatus" element={<VehicleStatusDashboard />} />
+          <Route path="/listgarage" element={<ListGarage />} />
         </Routes>
         <Chat />
       </main>

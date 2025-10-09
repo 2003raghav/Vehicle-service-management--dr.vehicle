@@ -13,19 +13,23 @@ export default function Homepage() {
             Connect with trusted service providers for all your vehicle
             maintenance and repair needs.
           </p>
-          <div className="flex gap-4 justify-center">
+          <div className="flex gap-4 justify-center ">
             <Link
               to="/services"
-              className="bg-white text-blue-700 hover:bg-gray-100 px-6 py-3 rounded-lg transition font-medium shadow-md hover:shadow-lg"
+              className="bg-green-500 hover:bg-green-600 text-white px-6 py-3 rounded-lg transition font-medium shadow-md hover:shadow-lg" style={{textDecoration:"none"}}
             >
               Find Services
             </Link>
             <Link
-              to="/providerSignup"
-              className="bg-green-500 hover:bg-green-600 text-white px-6 py-3 rounded-lg transition font-medium shadow-md hover:shadow-lg"
+              to="/listgarage"
+              className="bg-green-500 hover:bg-green-600 text-white px-6 py-3 rounded-lg transition font-medium shadow-md hover:shadow-lg" style={{textDecoration:"none"}}
             >
               List Your Garage
             </Link>
+            <Link
+              to="/serviceStatus"
+              className="bg-green-500 hover:bg-green-600 text-white px-6 py-3 rounded-lg transition font-medium shadow-md hover:shadow-lg" style={{textDecoration:"none"}}
+            >Service Status</Link>
           </div>
         </div>
         {/* Decorative background */}
@@ -157,11 +161,11 @@ export default function Homepage() {
             {[
               {
                 text: `"Found a great mechanic nearby who fixed my brake issue same day. The pricing was fair and the service was excellent!"`,
-                name: "Sarah Johnson",
+                name: "Suchitra Subramani",
               },
               {
                 text: `"As a garage owner, this platform has helped me connect with so many new customers. The booking system is easy to use and manage."`,
-                name: "Mike's Auto Repair",
+                name: "Samarath Prakash",
               },
             ].map((t, i) => (
               <div
@@ -201,13 +205,13 @@ export default function Homepage() {
           <div className="flex gap-4 justify-center">
             <Link
               to="/services"
-              className="bg-white text-blue-700 hover:bg-gray-100 px-6 py-3 rounded-lg transition font-medium shadow-md hover:shadow-lg"
+              className="bg-green-500 hover:bg-green-600 text-white px-6 py-3 rounded-lg transition font-medium shadow-md hover:shadow-lg"  style={{textDecoration:"none"}}
             >
               Find Services
             </Link>
             <Link
-              to="/providerSignup"
-              className="bg-green-500 hover:bg-green-600 text-white px-6 py-3 rounded-lg transition font-medium shadow-md hover:shadow-lg"
+              to="/listgarage"
+              className="bg-green-500 hover:bg-green-600 text-white px-6 py-3 rounded-lg transition font-medium shadow-md hover:shadow-lg"  style={{textDecoration:"none"}}
             >
               List Your Garage
             </Link>

@@ -24,7 +24,7 @@ export default function BookService() {
       <h1 className="text-2xl font-bold mb-4">Book Service</h1>
       <div className="bg-white p-4 rounded-lg shadow">
         <h2 className="text-xl font-bold">{service.name}</h2>
-        <p className="my-2">{service.service} - ${service.price}</p>
+        <p className="my-2">{service.service} - ₹{service.price}</p>
         
         <div className="my-4">
           <label className="block mb-2 font-medium">Select Time Slot:</label>

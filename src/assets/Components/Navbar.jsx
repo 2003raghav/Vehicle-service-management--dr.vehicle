@@ -1,16 +1,23 @@
 import { Link, useNavigate } from "react-router-dom";
 import { useState, useRef, useEffect } from "react";
-import { Menu, X, Search, Home, Wrench, User, LogIn, Info, HelpCircle, Phone, Settings, LogOut, MessageCircle, FilePen, } from "lucide-react";
+import { 
+  Menu, X, Search, Home, Wrench, User, LogIn, Info, 
+  HelpCircle, Phone, Settings, LogOut, FilePen 
+} from "lucide-react";
 import SearchBar from "./SearchBar";
 
-export default function Navbar() { 
+export default function Navbar() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isMobileSearchOpen, setIsMobileSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [vehicleImage, setVehicleImage] = useState(null);
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+
   const navigate = useNavigate();
   const profileRef = useRef(null);
 
+  // Handle click outside profile dropdown
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (profileRef.current && !profileRef.current.contains(event.target)) {
@@ -21,12 +28,35 @@ export default function Navbar() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
+  // Fetch vehicle image if user is logged in
+  useEffect(() => {
+    const username = localStorage.getItem("username");
+    if (username) {
+      setIsLoggedIn(true);
+      fetch(`http://localhost:8080/api/${username}`)
+        .then(res => res.json())
+        .then(data => {
+          if (data.imageName) {
+            setVehicleImage(`http://localhost:8080/api/images/${encodeURIComponent(data.imageName)}`);
+          }
+        })
+        .catch(err => console.error("Error fetching vehicle image:", err));
+    }
+  }, []);
+
   const handleSearch = () => {
     if (searchQuery.trim() !== "") {
       navigate(`/search?query=${encodeURIComponent(searchQuery)}`);
       setSearchQuery("");
       setIsMobileSearchOpen(false);
     }
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem("token");
+    localStorage.removeItem("username");
+    setIsLoggedIn(false);
+    navigate("/signin");
   };
 
   const closeSidebar = () => setIsSidebarOpen(false);
@@ -44,7 +74,6 @@ export default function Navbar() {
     { to: "/contactus", label: "Contact Support", icon: Phone },
     { to: "/faq", label: "FAQ", icon: HelpCircle },
     { to: "/settings", label: "Settings", icon: Settings },
-    { to: "/chat", label: "Chat", icon: MessageCircle },
     { to: "/feedback", label: "Feedback", icon: FilePen },
   ];
 
@@ -55,9 +84,12 @@ export default function Navbar() {
       <style>{`.link-clean, .link-clean:hover, .link-clean:focus, .link-clean:active, .link-clean:visited 
       { text-decoration: none !important; }`}</style>
 
+      {/* Navbar */}
       <nav className="bg-white shadow-md sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between h-16 items-center">
+            
+            {/* Left: Logo & Menu */}
             <div className="flex items-center">
               <button
                 className="text-gray-700 mr-3 hover:text-blue-600 transition p-2 rounded-lg hover:bg-blue-50"
@@ -65,7 +97,6 @@ export default function Navbar() {
               >
                 <Menu size={28} />
               </button>
-              &nbsp;&nbsp;&nbsp;
               <Link
                 to="/"
                 className={`${cleanLink} text-2xl font-bold text-blue-600 hover:text-blue-700 transition hover:scale-105`}
@@ -74,6 +105,7 @@ export default function Navbar() {
               </Link>
             </div>
 
+            {/* Middle: Search bar */}
             <div className="hidden md:flex flex-1 mx-6 max-w-xl">
               <SearchBar
                 searchQuery={searchQuery}
@@ -82,6 +114,7 @@ export default function Navbar() {
               />
             </div>
 
+            {/* Right: Desktop links & profile */}
             <div className="hidden md:flex space-x-4 items-center">
               {navLinks.map(({ to, label }) => (
                 <Link
@@ -93,40 +126,47 @@ export default function Navbar() {
                 </Link>
               ))}
 
-              <div className="relative" ref={profileRef}>
-                <button
-                  onClick={() => setIsProfileOpen(!isProfileOpen)}
-                  className="w-10 h-10 rounded-full border-2 border-gray-300 overflow-hidden focus:outline-none focus:ring-2 focus:ring-blue-500 hover:border-blue-400 hover:shadow-md transition-all"
-                >
-                  <img
-                    src="https://images.unsplash.com/photo-1472099645785-5658abf4ff4e"
-                    alt="Profile"
-                    className="w-full h-full object-cover hover:scale-110 transition-transform"
-                  />
-                </button>
+              {/* Profile dropdown */}
+              {isLoggedIn && (
+                <div className="relative" ref={profileRef}>
+                  <button
+                    onClick={() => setIsProfileOpen(!isProfileOpen)}
+                    className="w-10 h-10 rounded-full border-2 border-gray-300 overflow-hidden focus:outline-none focus:ring-2 focus:ring-blue-500 hover:border-blue-400 hover:shadow-md transition-all"
+                  >
+                    <img
+                      src={vehicleImage || "https://via.placeholder.com/40?text=Vehicle"}
+                      alt="Vehicle"
+                      className="w-full h-full object-cover hover:scale-110 transition-transform"
+                    />
+                  </button>
 
-                {isProfileOpen && (
-                  <div className="absolute right-0 mt-3 w-48 bg-white shadow-lg rounded-lg py-2 border animate-fadeIn border-gray-100">
-                    <Link
-                      to="/profile"
-                      className={`${cleanLink} block px-4 py-3 text-gray-700 hover:bg-blue-50 hover:text-blue-600 transition-all rounded-md mx-2`}
-                    >
-                      My Profile
-                    </Link>
-                    <Link
-                      to="/settings"
-                      className={`${cleanLink} block px-4 py-3 text-gray-700 hover:bg-blue-50 hover:text-blue-600 transition-all rounded-md mx-2`}
-                    >
-                      Settings
-                    </Link>
-                    <button className="w-full text-left px-4 py-3 text-red-600 hover:bg-red-50 hover:text-red-700 transition-all rounded-md mx-2">
-                      Logout
-                    </button>
-                  </div>
-                )}
-              </div>
+                  {isProfileOpen && (
+                    <div className="absolute right-0 mt-3 w-48 bg-white shadow-lg rounded-lg py-2 border animate-fadeIn border-gray-100">
+                      <Link
+                        to="/profile"
+                        className={`${cleanLink} block px-4 py-3 text-gray-700 hover:bg-blue-50 hover:text-blue-600 transition-all rounded-md mx-2`}
+                      >
+                        My Profile
+                      </Link>
+                      <Link
+                        to="/settings"
+                        className={`${cleanLink} block px-4 py-3 text-gray-700 hover:bg-blue-50 hover:text-blue-600 transition-all rounded-md mx-2`}
+                      >
+                        Settings
+                      </Link>
+                      <button
+                        onClick={handleLogout}
+                        className="w-full text-left px-4 py-3 text-red-600 hover:bg-red-50 hover:text-red-700 transition-all rounded-md mx-2 cursor-pointer"
+                      >
+                        Logout
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
+            {/* Mobile search */}
             <div className="md:hidden flex items-center space-x-3">
               <button
                 onClick={() => setIsMobileSearchOpen(!isMobileSearchOpen)}
@@ -149,15 +189,14 @@ export default function Navbar() {
         )}
       </nav>
 
+      {/* Sidebar */}
       <div
         className={`fixed top-0 left-0 h-full w-72 bg-white shadow-2xl rounded-r-2xl border-r border-gray-200 z-50 transform transition-transform duration-300 ease-in-out ${
           isSidebarOpen ? "translate-x-0" : "-translate-x-full"
         }`}
       >
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 bg-blue-50 rounded-tr-2xl">
-          <h2 className="text-lg font-bold text-blue-600 tracking-wide">
-            QuickFix Menu
-          </h2>
+          <h2 className="text-lg font-bold text-blue-600 tracking-wide">QuickFix Menu</h2>
           <button
             onClick={closeSidebar}
             className="text-gray-600 hover:text-red-500 transition p-1 rounded-full hover:bg-red-50"
@@ -178,9 +217,14 @@ export default function Navbar() {
             </Link>
           ))}
 
-          <button className="flex items-center space-x-3 w-full px-4 py-3 rounded-xl text-red-600 bg-red-50 hover:bg-red-100 hover:text-red-700 transition-all duration-200 shadow-sm hover:shadow-md hover:translate-x-1">
-            <LogOut size={20} /> <span className="font-medium">Logout</span>
-          </button>
+          {isLoggedIn && (
+            <button
+              onClick={handleLogout}
+              className="flex items-center space-x-3 w-full px-4 py-3 rounded-xl text-red-600 bg-red-50 hover:bg-red-100 hover:text-red-700 transition-all duration-200 shadow-sm hover:shadow-md hover:translate-x-1 cursor-pointer"
+            >
+              <LogOut size={20} /> <span className="font-medium">Logout</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -191,6 +235,7 @@ export default function Navbar() {
         ></div>
       )}
 
+      {/* Mobile bottom nav */}
       <div className="fixed bottom-0 left-0 right-0 bg-white shadow-lg border-t flex justify-around items-center py-3 md:hidden z-50">
         {navLinks.map(({ to, label, icon: Icon }) => (
           <Link

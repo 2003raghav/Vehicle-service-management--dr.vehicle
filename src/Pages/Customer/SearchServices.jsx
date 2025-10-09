@@ -68,7 +68,7 @@ export default function SearchServices() {
       </div>
 
       {/* Filters */}
-      <div className="flex gap-2 mb-6">
+      <div className="flex gap-2 mb-6 flex-wrap">
         <button className="px-3 py-1 bg-gray-200 rounded-full">All</button>
         <button className="px-3 py-1 bg-gray-200 rounded-full">Oil Change</button>
         <button className="px-3 py-1 bg-gray-200 rounded-full">Brake Repair</button>

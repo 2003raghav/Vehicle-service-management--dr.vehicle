@@ -17,7 +17,6 @@ export default function NewRegistration() {
     }
     setError("");
 
-    // Collect form data
     const formData = new FormData();
     formData.append("name", e.target.name.value);
     formData.append("username", e.target.username.value);
@@ -29,7 +28,7 @@ export default function NewRegistration() {
     formData.append("vehiclemodel", e.target.vehiclemodel.value);
     formData.append("yearofmanufacture", e.target.yearofmanufacture.value);
     formData.append("regno", e.target.regno.value);
-    formData.append("dateofbirth", e.target.dateofbirth.value); // ✅ added date of birth
+    formData.append("dateofbirth", e.target.dateofbirth.value);
 
     if (e.target.vehicleImage.files[0]) {
       formData.append("image", e.target.vehicleImage.files[0]);
@@ -42,8 +41,8 @@ export default function NewRegistration() {
       });
 
       if (res.ok) {
-        alert("✅ You have registered successfully!");
-        e.target.reset(); // reset form
+        alert("✅ Registration successful!");
+        e.target.reset();
         setPassword("");
         setConfirmPassword("");
         setVehicleImage(null);
@@ -60,7 +59,9 @@ export default function NewRegistration() {
   const handleVehicleImage = (e) => {
     const file = e.target.files[0];
     if (file) {
-      setVehicleImage(URL.createObjectURL(file));
+      const reader = new FileReader();
+      reader.onloadend = () => setVehicleImage(reader.result);
+      reader.readAsDataURL(file);
     }
   };
 
@@ -68,7 +69,7 @@ export default function NewRegistration() {
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-purple-100 via-pink-100 to-indigo-100 p-6">
       <div className="bg-white/90 backdrop-blur-md shadow-2xl rounded-2xl w-full max-w-3xl overflow-hidden border border-gray-200">
         
-        {/* Top Banner */}
+        {/* Header Banner */}
         <div className="relative">
           <img src={vehicleImg} alt="Register" className="w-full h-48 object-cover" />
           <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent flex items-end">
@@ -78,130 +79,66 @@ export default function NewRegistration() {
           </div>
         </div>
 
-        <div className="p-6 md:p-8">
-          <form className="space-y-6" onSubmit={handleSubmit}>
-            
+        <div className="p-6 md:p-8 space-y-8">
+          <form className="space-y-8" onSubmit={handleSubmit}>
+
             {/* Personal Info */}
             <div className="space-y-4">
-              <h3 className="text-lg font-semibold text-gray-800 border-b pb-2">Personal Information</h3>
+              <h3 className="section-heading">Personal Information</h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <input 
-                  type="text" 
-                  name="name"
-                  placeholder="Full Name" 
-                  className="input-stylish" 
-                  required 
-                />
-                <input 
-                  type="text" 
-                  name="username"
-                  placeholder="Username" 
-                  className="input-stylish" 
-                  required 
-                />
+                <input type="text" name="name" placeholder="Full Name" className="input-stylish" required />
+                <input type="text" name="username" placeholder="Username" className="input-stylish" required />
               </div>
-              <input 
-                type="date" 
-                name="dateofbirth" 
-                className="input-stylish" 
-                required 
-              />
+              <input type="date" name="dateofbirth" className="input-stylish w-full" required />
             </div>
 
-            {/* Security */}
+            {/* Account Security */}
             <div className="space-y-4">
-              <h3 className="text-lg font-semibold text-gray-800 border-b pb-2">Account Security</h3>
+              <h3 className="section-heading">Account Security</h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <input
-                  type="password"
-                  placeholder="Password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="input-stylish"
-                  required
-                />
-                <input
-                  type="password"
-                  placeholder="Confirm Password"
-                  value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
-                  className="input-stylish"
-                  required
-                />
+                <input type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} className="input-stylish" required />
+                <input type="password" placeholder="Confirm Password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} className="input-stylish" required />
               </div>
-              {error && <p className="text-red-600 text-sm mt-2 flex items-center">
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" viewBox="0 0 20 20" fill="currentColor">
-                  <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
-                </svg>
-                {error}
-              </p>}
+              {error && (
+                <p className="text-red-600 text-sm mt-2 flex items-center">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                  </svg>
+                  {error}
+                </p>
+              )}
             </div>
 
-            {/* Contact */}
+            {/* Contact Info */}
             <div className="space-y-4">
-              <h3 className="text-lg font-semibold text-gray-800 border-b pb-2">Contact Information</h3>
+              <h3 className="section-heading">Contact Information</h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <input 
-                  type="email" 
-                  name="email"
-                  placeholder="Email" 
-                  className="input-stylish" 
-                  required 
-                />
-                <input 
-                  type="tel" 
-                  name="phone"
-                  placeholder="Phone Number" 
-                  className="input-stylish" 
-                  required 
-                />
+                <input type="email" name="email" placeholder="Email" className="input-stylish" required />
+                <input type="tel" name="phone" placeholder="Phone Number" className="input-stylish" required />
               </div>
             </div>
 
-            {/* Vehicle */}
+            {/* Vehicle Info */}
             <div className="space-y-4">
-              <h3 className="text-lg font-semibold text-gray-800 border-b pb-2">Vehicle Information</h3>
-              <input 
-                type="text" 
-                name="address"
-                placeholder="Address" 
-                className="input-stylish" 
-                required 
-              /><br/><br/>
+              <h3 className="section-heading">Vehicle Information</h3>
+              <input type="text" name="address" placeholder="Address" className="input-stylish w-full" required />
               
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <input 
-                  type="text" 
-                  name="vehicletype"
-                  placeholder="Vehicle Type (Car, Bike, Truck...)" 
-                  className="input-stylish" 
-                />
-                <input 
-                  type="text" 
-                  name="vehiclemodel"
-                  placeholder="Vehicle Make & Model" 
-                  className="input-stylish" 
-                />
+                <input type="text" name="vehicletype" placeholder="Vehicle Type (Car, Bike, Truck...)" className="input-stylish" />
+                <input type="text" name="vehiclemodel" placeholder="Vehicle Make & Model" className="input-stylish" />
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <input 
-                  type="number" 
-                  name="yearofmanufacture"
-                  placeholder="Year of Manufacture" 
-                  className="input-stylish" 
-                />
-                <input 
-                  type="text" 
-                  name="regno"
-                  placeholder="Registration Number" 
-                  className="input-stylish" 
-                />
+                <input type="number" name="yearofmanufacture" placeholder="Year of Manufacture" className="input-stylish" />
+                <input type="text" name="regno" placeholder="Registration Number" className="input-stylish" />
               </div>
 
               {/* Vehicle Image Upload */}
-              <div className="mt-4">
-                <label className="block text-gray-700 mb-2 font-medium">Upload Vehicle Image</label>
+              <div className="mt-8 flex flex-col items-center text-center">
+                <label className="text-gray-800 font-semibold mb-3 text-base">
+                  Upload Vehicle Image
+                </label>
+
                 <input
                   type="file"
                   name="vehicleImage"
@@ -210,22 +147,34 @@ export default function NewRegistration() {
                   className="hidden"
                   id="vehicle-upload"
                 />
+
                 <label
                   htmlFor="vehicle-upload"
-                  className="cursor-pointer flex flex-col items-center justify-center border-2 border-dashed border-gray-300 rounded-xl p-6 text-gray-500 hover:border-purple-500 hover:text-purple-600 transition"
+                  className="cursor-pointer flex flex-col items-center justify-center border-2 border-dashed border-gray-300 rounded-2xl w-64 h-64 bg-gray-50 hover:border-purple-500 hover:bg-purple-50 transition-all"
                 >
                   {vehicleImage ? (
                     <img
                       src={vehicleImage}
                       alt="Vehicle Preview"
-                      className="w-40 h-40 object-cover rounded-lg shadow-md"
+                      className="w-full h-full object-cover rounded-xl shadow-md"
                     />
                   ) : (
                     <>
-                      <svg xmlns="http://www.w3.org/2000/svg" className="h-10 w-10 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        className="h-12 w-12 mb-3 text-gray-400"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
+                        />
                       </svg>
-                      <span className="text-sm">Click to upload or drag and drop</span>
+                      <span className="text-sm font-medium">Click to upload or drag & drop</span>
                       <span className="text-xs text-gray-400 mt-1">JPG, PNG up to 5MB</span>
                     </>
                   )}
@@ -233,16 +182,9 @@ export default function NewRegistration() {
               </div>
             </div>
 
-            {/* Agreement */}
+            {/* Terms */}
             <div className="flex items-start space-x-3">
-              <div className="flex items-center h-5 mt-0.5">
-                <input
-                  id="terms"
-                  type="checkbox"
-                  className="focus:ring-purple-500 h-4 w-4 text-purple-600 border-gray-300 rounded"
-                  required
-                />
-              </div>
+              <input id="terms" type="checkbox" className="focus:ring-purple-500 h-4 w-4 text-purple-600 border-gray-300 rounded" required />
               <label htmlFor="terms" className="text-sm text-gray-700">
                 I agree to the{" "}
                 <Link to="/terms" className="text-purple-600 hover:text-purple-500 underline">
@@ -262,7 +204,7 @@ export default function NewRegistration() {
         </div>
       </div>
 
-      {/* Custom Input Style */}
+      {/* Styles */}
       <style>
         {`
           .input-stylish {
@@ -279,6 +221,13 @@ export default function NewRegistration() {
             border-color: #a855f7;
             box-shadow: 0 0 8px rgba(168, 85, 247, 0.4);
             background: #fff;
+          }
+          .section-heading {
+            font-size: 1.125rem;
+            font-weight: 600;
+            color: #1f2937;
+            border-bottom: 2px solid #e5e7eb;
+            padding-bottom: 0.5rem;
           }
         `}
       </style>

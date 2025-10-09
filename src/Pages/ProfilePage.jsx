@@ -23,7 +23,7 @@ export default function ProfilePage() {
       .catch((err) => console.error("Error fetching profile:", err));
   }, []);
 
-  if (!user) return <p className="text-center mt-10">Loading profile...</p>;
+  if (!user) return <p className="text-center mt-10">Please Signin....</p>;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-4 flex items-center justify-center">
