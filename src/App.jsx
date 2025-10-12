@@ -21,6 +21,15 @@ import ProviderLogin from './Pages/Provider/ProviderLogin';
 import FeedbackForm from './assets/FeedbackForm';
 import VehicleStatusDashboard from './Pages/Customer/VehicleStatusDashboard';
 import ListGarage from './assets/Components/ListGarage';
+import Bookappointment from './Pages/Customer/Bookappointment';
+import ProviderForgotPassword from './Pages/Provider/ProviderForgotPassword';
+import Providerprofile from './Pages/Provider/Providerprofile';
+import Customerbooking from './Pages/Customer/Customerbooking';
+import Editprofile from './Pages/Customer/Editprofile';
+import ProviderEditProfile from './Pages/Provider/ProviderEditProfile';
+import SearchResults from './assets/SearchResults';
+import BillingPage from './Pages/BillingPage';
+import Payment from './Pages/Provider/Payment';
 
 export default function App() {
   return (
@@ -48,6 +57,15 @@ export default function App() {
           <Route path="/feedback" element={<FeedbackForm />} />
           <Route path="/serviceStatus" element={<VehicleStatusDashboard />} />
           <Route path="/listgarage" element={<ListGarage />} />
+          <Route path="/bookappointment" element={<Bookappointment />} />
+          <Route path='provider/forget-password' element={<ProviderForgotPassword />} />
+          <Route path='/provider/profile' element={<Providerprofile />} />
+          <Route path='provider/bookings' element={<Customerbooking/>}/>
+          <Route path='/edit-profile' element={<Editprofile  />} />
+          <Route path='provider/edit-profile' element={<ProviderEditProfile />} />
+          <Route path="/search" element={<SearchResults/>} />
+          <Route path="/billing/:id" element={<BillingPage />} />
+          <Route path='/payment-methods'element={<Payment />} />
         </Routes>
         <Chat />
       </main>

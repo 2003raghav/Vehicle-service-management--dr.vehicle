@@ -57,7 +57,7 @@ export default function AboutUs() {
       <Link
   to="/contactus"
   className="inline-block px-6 py-3 bg-blue-600 text-white font-medium rounded-lg shadow-md hover:bg-blue-700 transition"
->
+    style={{textDecoration:'none'}}>
   Contact Support
 </Link>
       </div>

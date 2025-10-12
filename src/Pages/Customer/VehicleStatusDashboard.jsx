@@ -1,5 +1,6 @@
 // VehicleServiceDashboard.jsx
 import React, { useState, useEffect } from "react";
+import { Link, useNavigate } from "react-router-dom"; // ✅ Import useNavigate
 import { 
   CheckCircle, 
   Clock, 
@@ -21,7 +22,8 @@ export default function VehicleServiceDashboard() {
   const [activeTab, setActiveTab] = useState("ongoing");
   const [loading, setLoading] = useState(true);
   const [liveViewActive, setLiveViewActive] = useState(false);
-  const username = localStorage.getItem("username"); // fetch username from login
+  const username = localStorage.getItem("username");
+  const navigate = useNavigate(); // ✅ initialize navigation
 
   useEffect(() => {
     if (!username) return;
@@ -35,7 +37,7 @@ export default function VehicleServiceDashboard() {
         setServices(data);
       } catch (err) {
         console.error(err);
-        setServices([]); // empty array if error
+        setServices([]);
       } finally {
         setLoading(false);
       }
@@ -70,25 +72,19 @@ export default function VehicleServiceDashboard() {
 
   const handleRequestLiveView = () => {
     setLiveViewActive(true);
-    // In a real app, this would connect to a live video feed
-    setTimeout(() => {
-      setLiveViewActive(false);
-    }, 5000); // Simulate 5 second connection time
+    setTimeout(() => setLiveViewActive(false), 5000);
   };
 
   const handleScheduleService = () => {
-    // Navigate to scheduling page or open modal
-    console.log("Navigate to schedule service");
+    // ✅ Navigate to booking page
+    navigate("/bookappointment");
   };
 
-  const handleViewServiceHistory = () => {
-    // Navigate to service history page
-    console.log("Navigate to service history");
-  };
+ 
 
   const handleRateService = () => {
-    // Open rating modal or navigate to rating page
     console.log("Open rating interface");
+    navigate("/feedback");
   };
 
   if (loading) {
@@ -120,10 +116,15 @@ export default function VehicleServiceDashboard() {
                 <span className="text-sm font-medium">Service Center: Bangalore</span>
               </div>
             </div>
-            <button className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition duration-200 flex items-center space-x-2">
-              <Phone className="w-4 h-4" />
-              <span>Contact Support</span>
-            </button>
+            
+                  <Link 
+          to="/contactus"
+          className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition duration-200 flex items-center space-x-2"
+          style={{textDecoration: 'none'}}
+        >
+          <Phone className="w-4 h-4" />
+          <span>Contact Support</span>
+        </Link>
           </div>
         </div>
 
@@ -170,6 +171,7 @@ export default function VehicleServiceDashboard() {
         <div className="grid lg:grid-cols-3 gap-8">
           {/* Service List */}
           <div className="lg:col-span-2">
+            {/* Tabs */}
             <div className="flex space-x-4 mb-6">
               <button
                 onClick={() => setActiveTab("ongoing")}
@@ -231,20 +233,6 @@ export default function VehicleServiceDashboard() {
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm text-gray-600 mb-4">
-                    <div className="flex items-center space-x-2">
-                      <Wrench className="w-4 h-4" />
-                      <span>Technician: {service.technician}</span>
-                    </div>
-                    <div className="flex items-center space-x-2">
-                      <Clock className="w-4 h-4" />
-                      <span>Est. Completion: {new Date(service.estimatedCompletion).toLocaleString()}</span>
-                    </div>
-                    <div className="flex items-center space-x-2">
-                      <span className="font-medium">Cost: {service.costEstimate}</span>
-                    </div>
-                  </div>
-
                   {/* Progress Timeline */}
                   <div className="relative">
                     <div className="absolute left-4 top-0 bottom-0 w-0.5 bg-gray-200"></div>
@@ -287,19 +275,17 @@ export default function VehicleServiceDashboard() {
             </div>
           </div>
 
-          {/* Sidebar - Live Service Broadcast & Quick Actions */}
+          {/* Sidebar */}
           <div className="space-y-6">
             {/* Live Service Broadcast */}
             <div className="bg-white rounded-xl shadow-lg p-6">
               <h2 className="text-xl font-bold text-gray-900 mb-4">Live Service Broadcast</h2>
-              
-              {/* Live Service Feed */}
               <div className="mb-6">
                 <div className="flex items-center justify-between mb-3">
                   <h3 className="font-semibold text-gray-700">Live Service Feed</h3>
                   <span className="text-sm text-gray-500">Country/office</span>
                 </div>
-                
+
                 <div className="bg-gray-100 rounded-lg p-4 mb-4 min-h-[120px] flex items-center justify-center">
                   {liveViewActive ? (
                     <div className="text-center">
@@ -310,7 +296,7 @@ export default function VehicleServiceDashboard() {
                     <p className="text-gray-500 text-center">Live feed will appear here when activated</p>
                   )}
                 </div>
-                
+
                 <div className="flex space-x-3">
                   <button 
                     onClick={handleRequestLiveView}
@@ -319,10 +305,6 @@ export default function VehicleServiceDashboard() {
                     <Video className="w-4 h-4" />
                     <span>Request Live View</span>
                   </button>
-                  <button className="flex-1 bg-green-600 text-white py-2 px-4 rounded-lg hover:bg-green-700 transition duration-200 flex items-center justify-center space-x-2">
-                    <MessageCircle className="w-4 h-4" />
-                    <span>Chat Support</span>
-                  </button>
                 </div>
               </div>
             </div>
@@ -330,7 +312,7 @@ export default function VehicleServiceDashboard() {
             {/* Quick Actions */}
             <div className="bg-white rounded-xl shadow-lg p-6">
               <h2 className="text-xl font-bold text-gray-900 mb-4">Quick Actions</h2>
-              
+
               <div className="space-y-3">
                 <button 
                   onClick={handleScheduleService}
@@ -345,18 +327,6 @@ export default function VehicleServiceDashboard() {
                   </div>
                 </button>
 
-                <button 
-                  onClick={handleViewServiceHistory}
-                  className="w-full bg-white border border-gray-300 rounded-lg p-4 hover:bg-gray-50 transition duration-200 flex items-center space-x-3 text-left"
-                >
-                  <div className="bg-green-100 p-2 rounded-lg">
-                    <History className="w-5 h-5 text-green-600" />
-                  </div>
-                  <div>
-                    <p className="font-medium text-gray-900">Service History</p>
-                    <p className="text-sm text-gray-500">View past service records</p>
-                  </div>
-                </button>
 
                 <button 
                   onClick={handleRateService}

@@ -27,7 +27,6 @@ export default function ProviderSignup() {
     }
     setError("");
 
-    // Use `name` attributes instead of index
     const formElements = e.target.elements;
     const providerData = {
       garagename: formElements.garagename.value,
@@ -74,70 +73,70 @@ export default function ProviderSignup() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-100 via-indigo-100 to-purple-100 p-6">
-      <div className="bg-white/90 backdrop-blur-md shadow-2xl rounded-2xl w-full max-w-3xl overflow-hidden border border-gray-200">
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 p-6">
+      <div className="bg-white shadow-2xl rounded-3xl w-full max-w-3xl overflow-hidden border border-gray-200">
+
         {/* Top Banner */}
         <div className="relative">
           <img src={garageImg} alt="Garage Register" className="w-full h-48 object-cover" />
           <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent flex items-end">
-            <h2 className="text-3xl font-bold text-white p-6 w-full drop-shadow-lg">
+            <h2 className="text-3xl font-bold text-white p-6 drop-shadow-lg w-full">
               Register Your Garage
             </h2>
           </div>
         </div>
 
         {/* Form */}
-        <div className="p-6 md:p-8">
-          <form className="space-y-6" onSubmit={handleSubmit}>
+        <div className="p-8 md:p-10 space-y-8">
+          <form onSubmit={handleSubmit} className="space-y-8">
+
             {/* Garage Info */}
-            <div className="space-y-4">
-              <h3 className="text-lg font-semibold text-gray-800 border-b pb-2">Garage Information</h3>
+            <div className="bg-gray-50 p-6 rounded-xl shadow-inner border border-gray-100 space-y-4">
+              <h3 className="text-lg font-semibold text-gray-700 border-b border-gray-200 pb-2">Garage Information</h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <input type="text" name="garagename" placeholder="Garage Name" className="input-stylish" required />
                 <input type="text" name="ownername" placeholder="Owner Name" className="input-stylish" required />
               </div>
-              <input type="text" name="garageaddress" placeholder="Garage Address" className="input-stylish" required />
+              <input type="text" name="garageaddress" placeholder="Garage Address" className="input-stylish w-full" required />
             </div>
 
-            {/* Security */}
-            <div className="space-y-4">
-              <h3 className="text-lg font-semibold text-gray-800 border-b pb-2">Account Security</h3>
+            {/* Account Security */}
+            <div className="bg-gray-50 p-6 rounded-xl shadow-inner border border-gray-100 space-y-4">
+              <h3 className="text-lg font-semibold text-gray-700 border-b border-gray-200 pb-2">Account Security</h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <input type="password" name="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} className="input-stylish" required />
                 <input type="password" name="confirmPassword" placeholder="Confirm Password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} className="input-stylish" required />
               </div>
-              {error && <p className="text-red-600 text-sm mt-2">{error}</p>}
+              {error && <p className="text-red-600 text-sm mt-2 flex items-center">{error}</p>}
             </div>
 
-            {/* Contact */}
-            <div className="space-y-4">
-              <h3 className="text-lg font-semibold text-gray-800 border-b pb-2">Contact Information</h3>
+            {/* Contact Info */}
+            <div className="bg-gray-50 p-6 rounded-xl shadow-inner border border-gray-100 space-y-4">
+              <h3 className="text-lg font-semibold text-gray-700 border-b border-gray-200 pb-2">Contact Information</h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <input type="email" name="email" placeholder="Email" className="input-stylish" required />
                 <input type="tel" name="phoneno" placeholder="Phone Number" className="input-stylish" required />
               </div>
             </div>
 
-            {/* Services */}
-            <div className="space-y-4">
-              <h3 className="text-lg font-semibold text-gray-800 border-b pb-2">Services Offered</h3>
+            {/* Services Offered */}
+            <div className="bg-gray-50 p-6 rounded-xl shadow-inner border border-gray-100 space-y-4">
+              <h3 className="text-lg font-semibold text-gray-700 border-b border-gray-200 pb-2">Services Offered</h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <input type="text" name="specializations" placeholder="Specialization (Cars, Bikes, Trucks...)" className="input-stylish" />
-                <input type="text" name="availableservices" placeholder="Available Services (Repairs, Oil Change...)" className="input-stylish" />
+                <input type="text" name="specializations" placeholder="Specializations (Cars, Bikes…)" className="input-stylish" />
+                <input type="text" name="availableservices" placeholder="Available Services (Repairs, Oil…)" className="input-stylish" />
               </div>
             </div>
 
             {/* Garage Image */}
-            <div className="mt-4">
-              <label className="block text-gray-700 mb-2 font-medium">Upload Garage Image</label>
+            <div className="bg-gray-50 p-6 rounded-xl shadow-inner border border-gray-100 flex flex-col items-center space-y-4">
+              <label className="text-gray-700 font-medium mb-2">Upload Garage Image</label>
               <input type="file" accept="image/*" onChange={handleGarageImage} className="hidden" id="garage-upload" />
-              <label htmlFor="garage-upload" className="cursor-pointer flex flex-col items-center justify-center border-2 border-dashed border-gray-300 rounded-xl p-6 text-gray-500 hover:border-blue-500 hover:text-blue-600 transition">
+              <label htmlFor="garage-upload" className="cursor-pointer flex flex-col items-center justify-center border-2 border-dashed border-gray-300 rounded-2xl w-64 h-64 bg-white hover:border-blue-500 hover:bg-blue-50 transition-all">
                 {garageImage ? (
-                  <img src={garageImage} alt="Garage Preview" className="w-40 h-40 object-cover rounded-lg shadow-md" />
+                  <img src={garageImage} alt="Garage Preview" className="w-full h-full object-cover rounded-xl shadow-md" />
                 ) : (
-                  <>
-                    <span className="text-sm">Click to upload or drag and drop</span>
-                  </>
+                  <span className="text-gray-400 text-center">Click to upload or drag & drop</span>
                 )}
               </label>
             </div>
@@ -148,7 +147,10 @@ export default function ProviderSignup() {
               <label htmlFor="terms" className="text-sm text-gray-700">I agree to the <Link to="/terms" className="text-blue-600 hover:text-blue-500 underline">terms and conditions</Link></label>
             </div>
 
-            <button type="submit" className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white py-3.5 rounded-lg font-semibold shadow-lg transition-all duration-300 transform hover:-translate-y-0.5">Register Garage</button>
+            {/* Submit */}
+            <button type="submit" className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white py-3.5 rounded-xl font-semibold shadow-lg transition-all duration-300 transform hover:-translate-y-0.5">
+              Register Garage
+            </button>
           </form>
         </div>
       </div>
@@ -165,8 +167,8 @@ export default function ProviderSignup() {
         }
         .input-stylish:focus {
           outline: none;
-          border-color: #2563eb;
-          box-shadow: 0 0 8px rgba(37, 99, 235, 0.4);
+          border-color: #3b82f6;
+          box-shadow: 0 0 8px rgba(59,130,246,0.4);
           background: #fff;
         }
       `}</style>

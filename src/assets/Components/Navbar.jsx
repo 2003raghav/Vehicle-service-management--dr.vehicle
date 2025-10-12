@@ -11,11 +11,52 @@ export default function Navbar() {
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isMobileSearchOpen, setIsMobileSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
-  const [vehicleImage, setVehicleImage] = useState(null);
+  const [userImage, setUserImage] = useState(null);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [userData, setUserData] = useState(null);
+  const [imageError, setImageError] = useState(false);
 
   const navigate = useNavigate();
   const profileRef = useRef(null);
+
+  // Check login status and fetch user data
+  useEffect(() => {
+    const checkLoginStatus = () => {
+      const username = localStorage.getItem("username");
+      const name = localStorage.getItem("name");
+      
+      if (username) {
+        setIsLoggedIn(true);
+        fetchUserData(username, name);
+      } else {
+        setIsLoggedIn(false);
+        setUserImage(null);
+        setUserData(null);
+      }
+    };
+
+    // Check initially
+    checkLoginStatus();
+
+    // Listen for storage changes and custom events
+    const handleStorageChange = () => {
+      checkLoginStatus();
+    };
+
+    const handleLoginEvent = () => {
+      checkLoginStatus();
+    };
+
+    window.addEventListener('storage', handleStorageChange);
+    window.addEventListener('userLoggedIn', handleLoginEvent);
+    window.addEventListener('userLoggedOut', handleLoginEvent);
+
+    return () => {
+      window.removeEventListener('storage', handleStorageChange);
+      window.removeEventListener('userLoggedIn', handleLoginEvent);
+      window.removeEventListener('userLoggedOut', handleLoginEvent);
+    };
+  }, []);
 
   // Handle click outside profile dropdown
   useEffect(() => {
@@ -28,21 +69,26 @@ export default function Navbar() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  // Fetch vehicle image if user is logged in
-  useEffect(() => {
-    const username = localStorage.getItem("username");
-    if (username) {
-      setIsLoggedIn(true);
-      fetch(`http://localhost:8080/api/${username}`)
-        .then(res => res.json())
-        .then(data => {
-          if (data.imageName) {
-            setVehicleImage(`http://localhost:8080/api/images/${encodeURIComponent(data.imageName)}`);
-          }
-        })
-        .catch(err => console.error("Error fetching vehicle image:", err));
+  const fetchUserData = async (username, name) => {
+    try {
+      const response = await fetch(`http://localhost:8080/api/users/${username}`);
+      if (response.ok) {
+        const data = await response.json();
+        setUserData(data);
+        
+        // Try to get user image
+        if (data.id) {
+          // Try user image from database endpoint
+          setUserImage(`http://localhost:8080/api/user-images/${data.id}`);
+        } else if (data.imageName) {
+          // Try image from file system
+          setUserImage(`http://localhost:8080/api/images/${encodeURIComponent(data.imageName)}`);
+        }
+      }
+    } catch (err) {
+      console.error("Error fetching user data:", err);
     }
-  }, []);
+  };
 
   const handleSearch = () => {
     if (searchQuery.trim() !== "") {
@@ -55,7 +101,16 @@ export default function Navbar() {
   const handleLogout = () => {
     localStorage.removeItem("token");
     localStorage.removeItem("username");
+    localStorage.removeItem("name");
+    localStorage.removeItem("userId");
     setIsLoggedIn(false);
+    setUserImage(null);
+    setUserData(null);
+    setImageError(false);
+    setIsProfileOpen(false);
+    
+    // Dispatch event for other components
+    window.dispatchEvent(new Event('userLoggedOut'));
     navigate("/signin");
   };
 
@@ -66,23 +121,56 @@ export default function Navbar() {
     { to: "/", label: "Home", icon: Home },
     { to: "/services", label: "Services", icon: Wrench },
     { to: "/provider/dashboard", label: "Providers", icon: User },
-    { to: "/signin", label: "Sign In", icon: LogIn },
   ];
 
   const sidebarLinks = [
     { to: "/aboutus", label: "About Us", icon: Info },
     { to: "/contactus", label: "Contact Support", icon: Phone },
     { to: "/faq", label: "FAQ", icon: HelpCircle },
-    { to: "/settings", label: "Settings", icon: Settings },
     { to: "/feedback", label: "Feedback", icon: FilePen },
   ];
 
   const cleanLink = "link-clean no-underline hover:no-underline focus:no-underline active:no-underline visited:no-underline";
 
+  // Get user initials for fallback avatar
+  const getUserInitials = () => {
+    if (userData?.name) {
+      return userData.name
+        .split(' ')
+        .map(word => word.charAt(0))
+        .join('')
+        .toUpperCase()
+        .slice(0, 2);
+    }
+    const username = localStorage.getItem("username");
+    return username ? username.charAt(0).toUpperCase() : "U";
+  };
+
+  // Get user display name
+  const getUserDisplayName = () => {
+    return userData?.name || localStorage.getItem("name") || "User";
+  };
+
+  const handleImageError = () => {
+    setImageError(true);
+  };
+
   return (
     <>
-      <style>{`.link-clean, .link-clean:hover, .link-clean:focus, .link-clean:active, .link-clean:visited 
-      { text-decoration: none !important; }`}</style>
+      <style>{`
+        .link-clean, .link-clean:hover, .link-clean:focus, .link-clean:active, .link-clean:visited { 
+          text-decoration: none !important; 
+        }
+        .avatar-fallback {
+          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+          color: white;
+          font-weight: bold;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 14px;
+        }
+      `}</style>
 
       {/* Navbar */}
       <nav className="bg-white shadow-md sticky top-0 z-50">
@@ -126,43 +214,88 @@ export default function Navbar() {
                 </Link>
               ))}
 
-              {/* Profile dropdown */}
-              {isLoggedIn && (
+              {/* Profile dropdown - Only show when logged in */}
+              {isLoggedIn ? (
                 <div className="relative" ref={profileRef}>
                   <button
                     onClick={() => setIsProfileOpen(!isProfileOpen)}
                     className="w-10 h-10 rounded-full border-2 border-gray-300 overflow-hidden focus:outline-none focus:ring-2 focus:ring-blue-500 hover:border-blue-400 hover:shadow-md transition-all"
                   >
-                    <img
-                      src={vehicleImage || "https://via.placeholder.com/40?text=Vehicle"}
-                      alt="Vehicle"
-                      className="w-full h-full object-cover hover:scale-110 transition-transform"
-                    />
+                    {userImage && !imageError ? (
+                      <img
+                        src={userImage}
+                        alt={`Profile picture of ${getUserDisplayName()}`}
+                        className="w-full h-full object-cover hover:scale-110 transition-transform"
+                        onError={handleImageError}
+                        loading="lazy"
+                      />
+                    ) : (
+                      <div className="w-full h-full avatar-fallback">
+                        {getUserInitials()}
+                      </div>
+                    )}
                   </button>
 
                   {isProfileOpen && (
-                    <div className="absolute right-0 mt-3 w-48 bg-white shadow-lg rounded-lg py-2 border animate-fadeIn border-gray-100">
-                      <Link
-                        to="/profile"
-                        className={`${cleanLink} block px-4 py-3 text-gray-700 hover:bg-blue-50 hover:text-blue-600 transition-all rounded-md mx-2`}
-                      >
-                        My Profile
-                      </Link>
-                      <Link
-                        to="/settings"
-                        className={`${cleanLink} block px-4 py-3 text-gray-700 hover:bg-blue-50 hover:text-blue-600 transition-all rounded-md mx-2`}
-                      >
-                        Settings
-                      </Link>
-                      <button
-                        onClick={handleLogout}
-                        className="w-full text-left px-4 py-3 text-red-600 hover:bg-red-50 hover:text-red-700 transition-all rounded-md mx-2 cursor-pointer"
-                      >
-                        Logout
-                      </button>
+                    <div className="absolute right-0 mt-3 w-56 bg-white shadow-xl rounded-xl py-3 border border-gray-100 animate-fadeIn">
+                      {/* User info header */}
+                      <div className="px-4 py-3 border-b border-gray-100">
+                        <p className="font-semibold text-gray-800 truncate">
+                          {getUserDisplayName()}
+                        </p>
+                        <p className="text-sm text-gray-600 truncate">
+                          {userData?.email || localStorage.getItem("username")}
+                        </p>
+                      </div>
+
+                      <div className="py-2">
+                        <Link
+                          to="/profile"
+                          onClick={() => setIsProfileOpen(false)}
+                          className={`${cleanLink} flex items-center space-x-3 px-4 py-3 text-gray-700 hover:bg-blue-50 hover:text-blue-600 transition-all rounded-md mx-2`}
+                        >
+                          <User size={18} />
+                          <span>My Profile</span>
+                        </Link>
+                        <Link
+                          to="/settings"
+                          onClick={() => setIsProfileOpen(false)}
+                          className={`${cleanLink} flex items-center space-x-3 px-4 py-3 text-gray-700 hover:bg-blue-50 hover:text-blue-600 transition-all rounded-md mx-2`}
+                        >
+                          <Settings size={18} />
+                          <span>Settings</span>
+                        </Link>
+                        <Link
+                          to="/bookappointment"
+                          onClick={() => setIsProfileOpen(false)}
+                          className={`${cleanLink} flex items-center space-x-3 px-4 py-3 text-gray-700 hover:bg-blue-50 hover:text-blue-600 transition-all rounded-md mx-2`}
+                        >
+                          <Wrench size={18} />
+                          <span>Book Service</span>
+                        </Link>
+                      </div>
+
+                      <div className="border-t border-gray-100 pt-2">
+                        <button
+                          onClick={handleLogout}
+                          className="flex items-center space-x-3 w-full text-left px-4 py-3 text-red-600 hover:bg-red-50 hover:text-red-700 transition-all rounded-md mx-2 cursor-pointer"
+                        >
+                          <LogOut size={18} />
+                          <span>Logout</span>
+                        </button>
+                      </div>
                     </div>
                   )}
                 </div>
+              ) : (
+                // Show login button when not logged in
+                <Link
+                  to="/signin"
+                  className={`${cleanLink} bg-blue-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-blue-700 transition shadow-sm hover:shadow-md flex items-center space-x-2`}
+                >
+                  <LogIn size={18} />
+                  <span>Sign In</span>
+                </Link>
               )}
             </div>
 
@@ -205,6 +338,37 @@ export default function Navbar() {
           </button>
         </div>
 
+        {/* User info in sidebar when logged in */}
+        {isLoggedIn && (
+          <div className="px-6 py-4 border-b border-gray-100 bg-gradient-to-r from-blue-50 to-indigo-50">
+            <div className="flex items-center space-x-3">
+              <div className="w-12 h-12 rounded-full border-2 border-white shadow-sm overflow-hidden">
+                {userImage && !imageError ? (
+                  <img
+                    src={userImage}
+                    alt={`Profile picture of ${getUserDisplayName()}`}
+                    className="w-full h-full object-cover"
+                    onError={handleImageError}
+                    loading="lazy"
+                  />
+                ) : (
+                  <div className="w-full h-full avatar-fallback">
+                    {getUserInitials()}
+                  </div>
+                )}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="font-semibold text-gray-800 truncate text-sm">
+                  {getUserDisplayName()}
+                </p>
+                <p className="text-gray-600 truncate text-xs">
+                  {userData?.email || localStorage.getItem("username")}
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
         <div className="p-6 space-y-2">
           {sidebarLinks.map(({ to, label, icon: Icon }) => (
             <Link
@@ -217,13 +381,24 @@ export default function Navbar() {
             </Link>
           ))}
 
-          {isLoggedIn && (
+          {isLoggedIn ? (
             <button
-              onClick={handleLogout}
+              onClick={() => {
+                handleLogout();
+                closeSidebar();
+              }}
               className="flex items-center space-x-3 w-full px-4 py-3 rounded-xl text-red-600 bg-red-50 hover:bg-red-100 hover:text-red-700 transition-all duration-200 shadow-sm hover:shadow-md hover:translate-x-1 cursor-pointer"
             >
               <LogOut size={20} /> <span className="font-medium">Logout</span>
             </button>
+          ) : (
+            <Link
+              to="/signin"
+              onClick={closeSidebar}
+              className={`${cleanLink} flex items-center space-x-3 px-4 py-3 rounded-xl text-green-600 bg-green-50 hover:bg-green-100 hover:text-green-700 transition-all duration-200 shadow-sm hover:shadow-md hover:translate-x-1`}
+            >
+              <LogIn size={20} /> <span className="font-medium">Sign In</span>
+            </Link>
           )}
         </div>
       </div>
@@ -247,6 +422,17 @@ export default function Navbar() {
             <span className="text-xs mt-1">{label}</span>
           </Link>
         ))}
+        
+        {/* Mobile profile link when logged in */}
+        {isLoggedIn && (
+          <Link
+            to="/profile"
+            className={`${cleanLink} flex flex-col items-center text-gray-700 hover:text-blue-600 transition p-2 rounded-lg hover:bg-blue-50`}
+          >
+            <User size={22} />
+            <span className="text-xs mt-1">Profile</span>
+          </Link>
+        )}
       </div>
     </>
   );

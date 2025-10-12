@@ -28,13 +28,22 @@ const bikeServices = [
 export default function SearchServices() {
   const [searchTerm, setSearchTerm] = useState('');
   const [activeTab, setActiveTab] = useState('car'); // "car" or "bike"
+  const [activeFilter, setActiveFilter] = useState('All');
 
   const services = activeTab === 'car' ? carServices : bikeServices;
 
-  const filteredServices = services.filter(service =>
-    service.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    service.service.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  // Dynamically get unique service types
+  const serviceTypes = ['All', ...Array.from(new Set(services.map(s => s.service)))];
+
+  const filteredServices = services.filter(service => {
+    const matchesSearch =
+      service.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      service.service.toLowerCase().includes(searchTerm.toLowerCase());
+
+    const matchesFilter = activeFilter === 'All' || service.service === activeFilter;
+
+    return matchesSearch && matchesFilter;
+  });
 
   return (
     <div className="p-6">
@@ -44,13 +53,13 @@ export default function SearchServices() {
       <div className="flex gap-4 mb-6">
         <button
           className={`px-4 py-2 rounded-full font-semibold ${activeTab === 'car' ? 'bg-blue-600 text-white' : 'bg-gray-200'}`}
-          onClick={() => setActiveTab('car')}
+          onClick={() => { setActiveTab('car'); setActiveFilter('All'); }}
         >
           Car Services
         </button>
         <button
           className={`px-4 py-2 rounded-full font-semibold ${activeTab === 'bike' ? 'bg-green-600 text-white' : 'bg-gray-200'}`}
-          onClick={() => setActiveTab('bike')}
+          onClick={() => { setActiveTab('bike'); setActiveFilter('All'); }}
         >
           Bike Services
         </button>
@@ -69,18 +78,23 @@ export default function SearchServices() {
 
       {/* Filters */}
       <div className="flex gap-2 mb-6 flex-wrap">
-        <button className="px-3 py-1 bg-gray-200 rounded-full">All</button>
-        <button className="px-3 py-1 bg-gray-200 rounded-full">Oil Change</button>
-        <button className="px-3 py-1 bg-gray-200 rounded-full">Brake Repair</button>
-        <button className="px-3 py-1 bg-gray-200 rounded-full">Battery</button>
-        <button className="px-3 py-1 bg-gray-200 rounded-full">Tyre</button>
-        <button className="px-3 py-1 bg-gray-200 rounded-full">Engine</button>
+        {serviceTypes.map(filter => (
+          <button
+            key={filter}
+            className={`px-3 py-1 rounded-full font-medium transition ${
+              activeFilter === filter ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700'
+            }`}
+            onClick={() => setActiveFilter(filter)}
+          >
+            {filter}
+          </button>
+        ))}
       </div>
 
       {/* Services List */}
       <div className="space-y-4">
         {filteredServices.length ? (
-          filteredServices.map((service) => <ServiceCard key={service.id} service={service} />)
+          filteredServices.map(service => <ServiceCard key={service.id} service={service} />)
         ) : (
           <p className="text-gray-500 text-center">No services found.</p>
         )}
