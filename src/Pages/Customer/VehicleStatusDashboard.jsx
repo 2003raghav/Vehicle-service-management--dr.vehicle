@@ -1,9 +1,9 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { 
-  CheckCircle, Clock, Car, Video, Wrench, Shield, MapPin,
-  Phone, MessageCircle, Calendar, Star, History, Play, Pause,
-  AlertCircle, X, Bug, RefreshCw
+  CheckCircle, Clock, Car, Video, Wrench, MapPin,
+  Phone, Calendar, Star, Play, Pause,
+  AlertCircle, X, Youtube
 } from "lucide-react";
 import axios from "axios";
 
@@ -12,457 +12,92 @@ export default function VehicleServiceDashboard() {
   const [selectedService, setSelectedService] = useState(null);
   const [activeTab, setActiveTab] = useState("ongoing");
   const [loading, setLoading] = useState(true);
-  const [activeStreams, setActiveStreams] = useState([]);
-  const [currentStream, setCurrentStream] = useState(null);
-  const [streamStatus, setStreamStatus] = useState({});
-  const [streamError, setStreamError] = useState("");
+  const [currentVideo, setCurrentVideo] = useState(null);
+  const [videoError, setVideoError] = useState("");
   const [isVideoPlaying, setIsVideoPlaying] = useState(false);
   const [showVideoModal, setShowVideoModal] = useState(false);
-  const [connectionStatus, setConnectionStatus] = useState("disconnected");
-  const [debugLogs, setDebugLogs] = useState([]);
-  const [showDebug, setShowDebug] = useState(false);
   
   const username = localStorage.getItem("username");
   const navigate = useNavigate();
-  
-  // WebRTC Refs
-  const videoRef = useRef(null);
-  const peerConnectionRef = useRef(null);
-  const streamIntervalRef = useRef(null);
-  const iceCandidateIntervalRef = useRef(null);
 
-  // Debug logging function
-  const addDebugLog = (message, data = null) => {
-    const timestamp = new Date().toLocaleTimeString();
-    const log = { timestamp, message, data };
-    setDebugLogs(prev => [log, ...prev.slice(0, 49)]);
-    console.log(`🔧 [Customer - ${timestamp}] ${message}`, data);
-  };
+  // Fixed YouTube car service video - always available
+  const carServiceVideo = "https://www.youtube.com/embed/LvR3yC3JffE?autoplay=1";
 
   // Enhanced API call with error handling
   const apiCall = async (url, options = {}) => {
     try {
-      addDebugLog(`API Call: ${url}`, options);
       const response = await axios({
         url,
         timeout: 15000,
         ...options
       });
-      addDebugLog(`API Success: ${url}`, response.data);
       return { data: response.data, error: null };
     } catch (error) {
-      addDebugLog(`API Error: ${url}`, error.message);
       console.warn(`API call failed for ${url}:`, error.message);
       return { data: null, error };
-    }
-  };
-
-  // Fetch services for customer
-  const fetchServices = async () => {
-    try {
-      if (!username) {
-        setLoading(false);
-        return;
-      }
-
-      addDebugLog(`🚀 Fetching services for customer: ${username}`);
-      const { data, error } = await apiCall(`http://localhost:8080/api/services/${username}`);
-      
-      if (error) {
-        throw new Error("No services found");
-      }
-
-      const servicesData = Array.isArray(data) ? data : (data ? [data] : []);
-      setServices(servicesData);
-      addDebugLog(`✅ Found ${servicesData.length} services`, servicesData.map(s => ({ id: s.id, status: s.status })));
-      
-    } catch (err) {
-      console.error(err);
-      setServices([]);
-      addDebugLog("❌ Error fetching services", err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Fetch active streams for customer
-  const fetchActiveStreams = async () => {
-    try {
-      if (!username) return;
-      
-      addDebugLog(`🔍 Checking for active streams for customer: ${username}`);
-      
-      const { data, error } = await apiCall(`http://localhost:8080/api/video/customer/${username}/active`);
-      
-      addDebugLog(`Active streams API response:`, { 
-        success: data?.success, 
-        count: data?.count,
-        streams: data?.streams,
-        error: error 
-      });
-      
-      if (!error && data?.success) {
-        const streams = data.streams || [];
-        setActiveStreams(streams);
-        setStreamError("");
-        
-        // Update stream status for each active stream
-        const statusMap = {};
-        streams.forEach(stream => {
-          statusMap[stream.appointmentId] = stream.status;
-        });
-        setStreamStatus(statusMap);
-        
-        addDebugLog("✅ Active streams updated", {
-          count: streams.length,
-          streams: streams.map(s => ({
-            id: s.appointmentId,
-            status: s.status,
-            provider: s.providerName,
-            streamId: s.streamId
-          }))
-        });
-
-        // If there are active streams but we're not connected, log it
-        if (streams.length > 0 && !currentStream) {
-          addDebugLog(`🎯 Found ${streams.length} active stream(s) but no current connection`);
-          streams.forEach(stream => {
-            addDebugLog(`Available stream: Appointment #${stream.appointmentId} - ${stream.providerName} - ${stream.status}`);
-          });
-        }
-      } else {
-        setActiveStreams([]);
-        if (data?.message) {
-          setStreamError(data.message);
-          addDebugLog("No active streams found", data.message);
-        } else {
-          addDebugLog("No active streams available");
-        }
-      }
-    } catch (error) {
-      console.error('Error fetching active streams:', error);
-      setActiveStreams([]);
-      setStreamError("Unable to fetch stream information");
-      addDebugLog("❌ Error fetching active streams", error);
-    }
-  };
-
-  // FIXED: Customer handles WebRTC answer instead of creating offer
-  const handleWebRTCAnswer = async (appointmentId) => {
-    try {
-      addDebugLog(`🎬 Handling WebRTC answer for appointment ${appointmentId}`);
-      
-      // Check for offer from provider
-      const { data: offerData, error: offerError } = await apiCall(
-        `http://localhost:8080/api/video/webrtc/offer/${appointmentId}`
-      );
-
-      addDebugLog(`📨 Offer response`, { 
-        success: offerData?.success, 
-        hasOffer: !!offerData?.offer 
-      });
-
-      if (offerError || !offerData?.success || !offerData.offer) {
-        addDebugLog(`❌ No offer found from provider`);
-        return false;
-      }
-
-      const offer = JSON.parse(offerData.offer);
-      addDebugLog(`✅ Received offer from provider`, { type: offer.type });
-
-      // Create peer connection
-      if (peerConnectionRef.current) {
-        peerConnectionRef.current.close();
-      }
-
-      peerConnectionRef.current = new RTCPeerConnection({
-        iceServers: [
-          { urls: 'stun:stun.l.google.com:19302' },
-          { urls: 'stun:stun1.l.google.com:19302' },
-          { urls: 'stun:stun2.l.google.com:19302' }
-        ]
-      });
-
-      // Set up event handlers
-      peerConnectionRef.current.onicecandidate = (event) => {
-        if (event.candidate) {
-          addDebugLog(`❄️ Generated ICE candidate`);
-          apiCall(`http://localhost:8080/api/video/webrtc/ice-candidate/${appointmentId}`, {
-            method: 'POST',
-            data: {
-              candidate: JSON.stringify(event.candidate),
-              sdpMid: event.candidate.sdpMid,
-              sdpMLineIndex: event.candidate.sdpMLineIndex,
-              type: 'customer'
-            }
-          });
-        }
-      };
-
-      peerConnectionRef.current.ontrack = (event) => {
-        addDebugLog(`📹 Received remote track from provider`, {
-          trackKind: event.track.kind,
-          streamId: event.streams[0]?.id
-        });
-        
-        if (videoRef.current && event.streams[0]) {
-          videoRef.current.srcObject = event.streams[0];
-          setIsVideoPlaying(true);
-          setConnectionStatus("connected");
-          addDebugLog(`✅ Video stream attached and playing`);
-        }
-      };
-
-      peerConnectionRef.current.onconnectionstatechange = () => {
-        const state = peerConnectionRef.current.connectionState;
-        setConnectionStatus(state);
-        addDebugLog(`🔗 Connection state: ${state}`);
-      };
-
-      peerConnectionRef.current.oniceconnectionstatechange = () => {
-        const state = peerConnectionRef.current.iceConnectionState;
-        addDebugLog(`❄️ ICE connection state: ${state}`);
-        
-        if (state === 'connected') {
-          addDebugLog("✅ WebRTC connected successfully");
-        } else if (state === 'failed') {
-          addDebugLog("❌ WebRTC connection failed");
-          setStreamError("WebRTC connection failed. Please try again.");
-        }
-      };
-
-      // Set remote description and create answer
-      await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(offer));
-      addDebugLog(`✅ Remote description set`);
-
-      const answer = await peerConnectionRef.current.createAnswer();
-      await peerConnectionRef.current.setLocalDescription(answer);
-      addDebugLog(`✅ Created local answer`);
-
-      // Send answer to server
-      const { error: answerError } = await apiCall(
-        `http://localhost:8080/api/video/webrtc/answer/${appointmentId}`,
-        {
-          method: 'POST',
-          data: { 
-            answer: JSON.stringify(answer),
-            customerName: username
-          }
-        }
-      );
-
-      if (!answerError) {
-        addDebugLog(`✅ Answer sent to provider successfully`);
-        
-        // Start ICE candidate exchange
-        startProviderICECandidateCheck(appointmentId);
-        return true;
-      } else {
-        throw new Error('Failed to send WebRTC answer');
-      }
-
-    } catch (error) {
-      console.error('Error handling WebRTC answer:', error);
-      addDebugLog(`❌ Error handling answer`, error);
-      return false;
-    }
-  };
-
-  const startProviderICECandidateCheck = (appointmentId) => {
-    if (iceCandidateIntervalRef.current) {
-      clearInterval(iceCandidateIntervalRef.current);
-    }
-
-    iceCandidateIntervalRef.current = setInterval(async () => {
-      try {
-        const { data, error } = await apiCall(
-          `http://localhost:8080/api/video/webrtc/ice-candidates/${appointmentId}?type=provider`
-        );
-        
-        if (!error && data?.success) {
-          const candidates = data.candidates || [];
-          if (candidates.length > 0) {
-            addDebugLog(`✅ Found ${candidates.length} provider ICE candidates`);
-          }
-          
-          for (const candidateData of candidates) {
-            try {
-              const candidate = JSON.parse(candidateData.candidate);
-              await peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(candidate));
-              addDebugLog("✅ Added provider ICE candidate");
-            } catch (e) {
-              console.error('Error adding ICE candidate:', e);
-              addDebugLog("❌ Error adding ICE candidate", e);
-            }
-          }
-        }
-      } catch (error) {
-        console.error('Error fetching ICE candidates:', error);
-        addDebugLog("❌ Error fetching ICE candidates", error);
-      }
-    }, 2000);
-  };
-
-  // Enhanced Live View Request Function
-  const handleRequestLiveView = async (appointmentId) => {
-    try {
-      setConnectionStatus("connecting");
-      setStreamError("");
-      addDebugLog(`🎯 Requesting live view for appointment ${appointmentId}`);
-
-      // Get stream details
-      const { data: streamData, error: streamError } = await apiCall(
-        `http://localhost:8080/api/video/stream/${appointmentId}`
-      );
-
-      addDebugLog("Stream details response", { 
-        success: streamData?.success, 
-        stream: streamData?.stream,
-        error: streamError 
-      });
-
-      if (streamError || !streamData?.success) {
-        // Try alternative approach - check if stream exists in active streams
-        const activeStream = activeStreams.find(stream => stream.appointmentId === appointmentId);
-        
-        if (activeStream) {
-          addDebugLog(`✅ Found stream in active streams list:`, activeStream);
-          setCurrentStream(activeStream);
-          setShowVideoModal(true);
-          
-          // FIXED: Customer waits for and handles offer from provider
-          await handleWebRTCAnswer(appointmentId);
-          return;
-        }
-        
-        // Try one more endpoint for stream information
-        addDebugLog(`🔄 Trying alternative stream endpoint for appointment ${appointmentId}`);
-        const { data: altStreamData } = await apiCall(`http://localhost:8080/api/video/appointment/${appointmentId}`);
-        
-        if (altStreamData?.success && altStreamData.stream) {
-          addDebugLog(`✅ Found stream via alternative endpoint:`, altStreamData.stream);
-          setCurrentStream(altStreamData.stream);
-          setShowVideoModal(true);
-          
-          await handleWebRTCAnswer(appointmentId);
-          return;
-        }
-        
-        const errorMsg = "No active stream found for this service. Please ask the provider to start the video stream.";
-        setStreamError(errorMsg);
-        addDebugLog("❌ " + errorMsg);
-        return;
-      }
-
-      const stream = streamData.stream;
-      addDebugLog("✅ Stream found, setting up WebRTC", {
-        appointmentId: stream.appointmentId,
-        provider: stream.providerName,
-        status: stream.status
-      });
-
-      setCurrentStream(stream);
-      setShowVideoModal(true);
-
-      // Request minimal media access for the customer (viewer)
-      try {
-        addDebugLog("🎤 Requesting media access for customer");
-        const userStream = await navigator.mediaDevices.getUserMedia({ 
-          video: false, // Customer doesn't need to send video
-          audio: false  // Customer doesn't need to send audio
-        });
-        userStream.getTracks().forEach(track => track.stop());
-        addDebugLog("✅ Media access handled");
-      } catch (mediaError) {
-        addDebugLog("ℹ️ Media access not required for viewing", mediaError);
-      }
-
-      await handleWebRTCAnswer(appointmentId);
-
-      // Auto stop after 30 minutes
-      setTimeout(() => {
-        addDebugLog("⏰ Auto-stopping live view after 30 minutes");
-        handleStopLiveView();
-      }, 30 * 60 * 1000);
-      
-    } catch (error) {
-      console.error('Error joining live stream:', error);
-      const errorMsg = 'Unable to connect to live stream. Please try again.';
-      setStreamError(errorMsg);
-      setConnectionStatus("failed");
-      addDebugLog("❌ Error joining live stream", error);
-    }
-  };
-
-  const handleStopLiveView = () => {
-    addDebugLog("🛑 Stopping live view");
-    cleanupWebRTC();
-    setCurrentStream(null);
-    setShowVideoModal(false);
-    setIsVideoPlaying(false);
-    setConnectionStatus("disconnected");
-    setStreamError("");
-  };
-
-  const cleanupWebRTC = () => {
-    addDebugLog("🧹 Cleaning up WebRTC resources");
-    if (peerConnectionRef.current) {
-      peerConnectionRef.current.close();
-      peerConnectionRef.current = null;
-    }
-    if (iceCandidateIntervalRef.current) {
-      clearInterval(iceCandidateIntervalRef.current);
-      iceCandidateIntervalRef.current = null;
-    }
-    if (videoRef.current) {
-      videoRef.current.srcObject = null;
-    }
-  };
-
-  const toggleVideoPlayback = () => {
-    if (videoRef.current) {
-      if (isVideoPlaying) {
-        videoRef.current.pause();
-      } else {
-        videoRef.current.play().catch(console.error);
-      }
-      setIsVideoPlaying(!isVideoPlaying);
-      addDebugLog(`🎥 Video playback ${isVideoPlaying ? 'paused' : 'played'}`);
     }
   };
 
   useEffect(() => {
     if (!username) return;
 
-    const loadData = async () => {
-      await fetchServices();
-      await fetchActiveStreams();
-      
-      // Check if any services are in-progress and might have streams
-      const inProgressServices = services.filter(service => service.status === "in-progress");
-      if (inProgressServices.length > 0) {
-        addDebugLog(`🔍 Found ${inProgressServices.length} in-progress services, checking for streams...`);
-        inProgressServices.forEach(service => {
-          addDebugLog(`Service ${service.id} (${service.vehicleModel}) is in-progress`);
-        });
+    const fetchServices = async () => {
+      try {
+        const { data, error } = await apiCall(`http://localhost:8080/api/services/${username}`);
+        
+        if (error) throw new Error("No services found");
+
+        setServices(data || []);
+        
+      } catch (err) {
+        console.error(err);
+        setServices([]);
+      } finally {
+        setLoading(false);
       }
     };
 
-    loadData();
-
-    // Set up interval to check for active streams - reduced to 5 seconds for faster detection
-    streamIntervalRef.current = setInterval(fetchActiveStreams, 5000);
-    
-    return () => {
-      if (streamIntervalRef.current) {
-        clearInterval(streamIntervalRef.current);
-      }
-      if (iceCandidateIntervalRef.current) {
-        clearInterval(iceCandidateIntervalRef.current);
-      }
-      cleanupWebRTC();
-    };
+    fetchServices();
   }, [username]);
+
+  // YouTube Video Functions
+  const handleWatchVideo = () => {
+    try {
+      setVideoError("");
+      
+      const videoData = {
+        providerName: "Service Center",
+        status: 'active',
+        youtubeLink: carServiceVideo,
+        serviceType: "Car Service Tutorial"
+      };
+
+      setCurrentVideo(videoData);
+      setShowVideoModal(true);
+      setIsVideoPlaying(true);
+
+      // Auto stop after 30 minutes
+      setTimeout(() => {
+        handleStopVideo();
+      }, 30 * 60 * 1000);
+      
+    } catch (error) {
+      console.error('Error loading video:', error);
+      const errorMsg = 'Unable to load video. Please try again later.';
+      setVideoError(errorMsg);
+    }
+  };
+
+  const handleStopVideo = () => {
+    setCurrentVideo(null);
+    setShowVideoModal(false);
+    setIsVideoPlaying(false);
+    setVideoError("");
+  };
+
+  const toggleVideoPlayback = () => {
+    setIsVideoPlaying(!isVideoPlaying);
+  };
 
   const filteredServices = services.filter(service => 
     activeTab === "ongoing" 
@@ -496,103 +131,33 @@ export default function VehicleServiceDashboard() {
     navigate("/feedback");
   };
 
-  // Check if service has active stream
-  const hasActiveStream = (serviceId) => {
-    return activeStreams.some(stream => stream.appointmentId === serviceId);
-  };
-
-  const getStreamStatus = (serviceId) => {
-    return streamStatus[serviceId] || 'inactive';
-  };
-
-  // Debug Panel Component
-  const DebugPanel = () => {
-    if (!showDebug) return null;
-
-    return (
-      <div className="fixed bottom-4 right-4 bg-gray-900 text-white p-4 rounded-lg max-w-md max-h-64 overflow-y-auto text-xs z-50">
-        <div className="flex justify-between items-center mb-2">
-          <h4 className="font-bold">Customer Debug Logs</h4>
-          <button 
-            onClick={() => setDebugLogs([])}
-            className="text-xs bg-red-600 px-2 py-1 rounded"
-          >
-            Clear
-          </button>
-        </div>
-        {debugLogs.map((log, index) => (
-          <div key={index} className="border-b border-gray-700 py-1">
-            <div className="text-green-400">[{log.timestamp}] {log.message}</div>
-            {log.data && (
-              <div className="text-gray-400 text-xs truncate">
-                {JSON.stringify(log.data)}
-              </div>
-            )}
-          </div>
-        ))}
-      </div>
-    );
-  };
-
-  // Debug Button Component
-  const DebugButton = () => (
-    <button
-      onClick={() => setShowDebug(!showDebug)}
-      className={`px-3 py-2 rounded-lg flex items-center space-x-2 ${
-        showDebug ? 'bg-red-600 text-white' : 'bg-gray-600 text-white'
-      }`}
-    >
-      <Bug className="w-4 h-4" />
-      <span>Debug {showDebug ? 'ON' : 'OFF'}</span>
-    </button>
-  );
-
-  // Video Modal Component with WebRTC
-  const VideoStreamModal = () => {
-    if (!showVideoModal || !currentStream) return null;
-
-    const getConnectionStatusColor = () => {
-      switch (connectionStatus) {
-        case "connected": return "bg-green-500";
-        case "connecting": return "bg-yellow-500";
-        case "failed": return "bg-red-500";
-        default: return "bg-gray-500";
-      }
-    };
-
-    const getConnectionStatusText = () => {
-      switch (connectionStatus) {
-        case "connected": return "Connected";
-        case "connecting": return "Connecting...";
-        case "failed": return "Connection Failed";
-        default: return "Disconnected";
-      }
-    };
+  // YouTube Video Modal Component
+  const YouTubeVideoModal = () => {
+    if (!showVideoModal || !currentVideo) return null;
 
     return (
       <div className="fixed inset-0 bg-black bg-opacity-90 flex items-center justify-center z-50 p-4">
         <div className="bg-gray-900 rounded-lg w-full max-w-6xl h-[90vh] flex flex-col">
           <div className="flex justify-between items-center p-4 border-b border-gray-700">
             <div className="flex items-center space-x-3">
-              <Video className="w-6 h-6 text-blue-400" />
+              <Youtube className="w-6 h-6 text-red-600" />
               <div>
                 <h3 className="text-lg font-semibold text-white">
-                  Live Service Stream - Appointment #{currentStream.appointmentId}
+                  Car Service Educational Video
                 </h3>
                 <p className="text-sm text-gray-400">
-                  Provider: {currentStream.providerName} • Vehicle Service
+                  Learn about professional car service procedures
                 </p>
               </div>
             </div>
             <div className="flex items-center space-x-4">
-              <DebugButton />
               <div className="flex items-center space-x-2">
-                <div className={`w-3 h-3 rounded-full ${getConnectionStatusColor()} animate-pulse`}></div>
+                <div className={`w-3 h-3 rounded-full ${isVideoPlaying ? 'bg-green-500' : 'bg-yellow-500'} animate-pulse`}></div>
                 <span className="text-sm text-white font-medium">
-                  {getConnectionStatusText()}
+                  {isVideoPlaying ? 'PLAYING' : 'PAUSED'}
                 </span>
               </div>
-              <button onClick={handleStopLiveView} className="text-gray-400 hover:text-white transition-colors">
+              <button onClick={handleStopVideo} className="text-gray-400 hover:text-white transition-colors">
                 <X className="w-6 h-6" />
               </button>
             </div>
@@ -600,26 +165,22 @@ export default function VehicleServiceDashboard() {
 
           <div className="flex-1 flex flex-col">
             <div className="flex-1 bg-black relative">
-              {isVideoPlaying ? (
-                <video
-                  ref={videoRef}
-                  autoPlay
-                  playsInline
-                  muted
-                  className="w-full h-full object-contain"
-                  onPlay={() => setIsVideoPlaying(true)}
-                  onPause={() => setIsVideoPlaying(false)}
+              {currentVideo?.youtubeLink ? (
+                <iframe
+                  src={isVideoPlaying ? currentVideo.youtubeLink : currentVideo.youtubeLink.replace('autoplay=1', 'autoplay=0')}
+                  className="w-full h-full"
+                  frameBorder="0"
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                  allowFullScreen
+                  title="Car Service Educational Video"
                 />
               ) : (
                 <div className="absolute inset-0 flex items-center justify-center">
                   <div className="text-center text-white">
-                    <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-blue-500 mx-auto mb-4"></div>
-                    <p className="text-lg">Establishing connection...</p>
+                    <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-red-500 mx-auto mb-4"></div>
+                    <p className="text-lg">Loading video...</p>
                     <p className="text-sm text-gray-400 mt-2">
-                      Connecting to service provider's video feed
-                    </p>
-                    <p className="text-xs text-gray-500 mt-1">
-                      Appointment #{currentStream.appointmentId} • {currentStream.providerName}
+                      Preparing educational video
                     </p>
                   </div>
                 </div>
@@ -634,7 +195,7 @@ export default function VehicleServiceDashboard() {
                   <span>{isVideoPlaying ? 'Pause' : 'Play'}</span>
                 </button>
                 <button
-                  onClick={handleStopLiveView}
+                  onClick={handleStopVideo}
                   className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
                 >
                   Stop Watching
@@ -645,41 +206,41 @@ export default function VehicleServiceDashboard() {
                 <div className="absolute top-4 left-4 flex items-center space-x-2">
                   <div className="w-3 h-3 bg-red-500 rounded-full animate-pulse"></div>
                   <span className="text-white text-sm font-medium bg-black bg-opacity-50 px-2 py-1 rounded">
-                    LIVE
+                    YOUTUBE
                   </span>
                 </div>
               )}
             </div>
 
-            {/* Stream Information */}
+            {/* Video Information */}
             <div className="p-4 bg-gray-800 border-t border-gray-700">
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
                 <div className="text-center p-2 bg-gray-700 rounded">
-                  <p className="font-medium text-gray-300">Appointment ID</p>
-                  <p className="text-white">#{currentStream.appointmentId}</p>
+                  <p className="font-medium text-gray-300">Video Type</p>
+                  <p className="text-white">Educational</p>
                 </div>
                 <div className="text-center p-2 bg-gray-700 rounded">
                   <p className="font-medium text-gray-300">Provider</p>
-                  <p className="text-white">{currentStream.providerName}</p>
+                  <p className="text-white">Service Center</p>
                 </div>
                 <div className="text-center p-2 bg-gray-700 rounded">
-                  <p className="font-medium text-gray-300">Status</p>
-                  <p className="text-white capitalize">{currentStream.status}</p>
+                  <p className="font-medium text-gray-300">Content</p>
+                  <p className="text-white">Car Service</p>
                 </div>
                 <div className="text-center p-2 bg-gray-700 rounded">
-                  <p className="font-medium text-gray-300">Connection</p>
-                  <p className="text-white capitalize">{connectionStatus}</p>
+                  <p className="font-medium text-gray-300">Platform</p>
+                  <p className="text-white">YouTube</p>
                 </div>
               </div>
 
-              {/* WebRTC Status Notice */}
+              {/* YouTube Status Notice */}
               <div className="mt-4 p-3 bg-blue-900 border border-blue-700 rounded-lg">
                 <div className="flex items-start space-x-2">
-                  <Video className="w-4 h-4 text-blue-300 mt-0.5 flex-shrink-0" />
+                  <Youtube className="w-4 h-4 text-blue-300 mt-0.5 flex-shrink-0" />
                   <div>
-                    <p className="text-sm text-blue-200 font-medium">WebRTC Live Stream</p>
+                    <p className="text-sm text-blue-200 font-medium">Educational Service Video</p>
                     <p className="text-xs text-blue-300">
-                      Real-time video feed from your service provider using WebRTC technology
+                      Watch this educational video to learn about professional car service procedures and maintenance tips.
                     </p>
                   </div>
                 </div>
@@ -714,14 +275,6 @@ export default function VehicleServiceDashboard() {
             <p className="text-gray-600 mt-2">Track and manage your vehicle services</p>
           </div>
           <div className="flex items-center space-x-4 mt-4 lg:mt-0">
-            <DebugButton />
-            <button
-              onClick={fetchActiveStreams}
-              className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition duration-200 flex items-center space-x-2"
-            >
-              <RefreshCw className="w-4 h-4" />
-              <span>Refresh Streams</span>
-            </button>
             <div className="bg-white rounded-lg shadow-sm p-3">
               <div className="flex items-center space-x-2">
                 <MapPin className="w-5 h-5 text-blue-600" />
@@ -778,20 +331,20 @@ export default function VehicleServiceDashboard() {
           <div className="bg-white rounded-xl shadow-sm p-6 border-l-4 border-purple-500">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-gray-600">Live Streams</p>
-                <p className="text-2xl font-bold text-gray-900">{activeStreams.length}</p>
+                <p className="text-sm text-gray-600">Service Video</p>
+                <p className="text-2xl font-bold text-gray-900">Always Available</p>
               </div>
               <Video className="w-8 h-8 text-purple-500" />
             </div>
           </div>
         </div>
 
-        {/* Stream Error Message */}
-        {streamError && (
+        {/* Video Error Message */}
+        {videoError && (
           <div className="mb-6 bg-yellow-100 border border-yellow-400 text-yellow-700 px-4 py-3 rounded">
             <div className="flex items-center">
               <AlertCircle className="w-4 h-4 mr-2" />
-              <span>{streamError}</span>
+              <span>{videoError}</span>
             </div>
           </div>
         )}
@@ -865,28 +418,8 @@ export default function VehicleServiceDashboard() {
                             {service.licensePlate || "No license plate"}
                           </p>
                           <p className="text-gray-700 mt-1">
-                            {service.description || "Vehicle maintenance service"}
+                            {service.serviceType || "Vehicle maintenance service"}
                           </p>
-                          
-                          {/* Enhanced Live Stream Indicator */}
-                          {hasActiveStream(service.id) && (
-                            <div className="flex items-center space-x-2 mt-2">
-                              <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse"></div>
-                              <span className="text-xs text-red-600 font-medium">
-                                🔴 LIVE STREAM AVAILABLE • {getStreamStatus(service.id).toUpperCase()}
-                              </span>
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  addDebugLog(`🎯 User clicked Join Live for service ${service.id}`);
-                                  handleRequestLiveView(service.id);
-                                }}
-                                className="text-xs bg-red-600 text-white px-2 py-1 rounded hover:bg-red-700 ml-2"
-                              >
-                                Join Now
-                              </button>
-                            </div>
-                          )}
                         </div>
                       </div>
                       <div className="flex flex-col items-end mt-3 lg:mt-0 space-y-2">
@@ -944,23 +477,6 @@ export default function VehicleServiceDashboard() {
                         </div>
                       </div>
                     )}
-
-                    {/* Live Stream Button for In-Progress Services */}
-                    {service.status === "in-progress" && hasActiveStream(service.id) && (
-                      <div className="mt-4 flex justify-end">
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            addDebugLog(`🎯 User clicked Join Live Service Stream for service ${service.id}`);
-                            handleRequestLiveView(service.id);
-                          }}
-                          className="flex items-center space-x-2 bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 transition duration-200"
-                        >
-                          <Video className="w-4 h-4" />
-                          <span>Join Live Service Stream</span>
-                        </button>
-                      </div>
-                    )}
                   </div>
                 ))
               )}
@@ -969,33 +485,33 @@ export default function VehicleServiceDashboard() {
 
           {/* Sidebar */}
           <div className="space-y-6">
-            {/* Live Service Broadcast */}
+            {/* Service Video */}
             <div className="bg-white rounded-xl shadow-lg p-6">
-              <h2 className="text-xl font-bold text-gray-900 mb-4">Live Service Broadcast</h2>
+              <h2 className="text-xl font-bold text-gray-900 mb-4">Service Video</h2>
               <div className="mb-6">
                 <div className="flex items-center justify-between mb-3">
-                  <h3 className="font-semibold text-gray-700">Live Service Feed</h3>
-                  {currentStream && (
+                  <h3 className="font-semibold text-gray-700">Educational Video</h3>
+                  {currentVideo && (
                     <span className="text-sm text-red-600 font-medium flex items-center">
                       <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse mr-1"></div>
-                      LIVE
+                      PLAYING
                     </span>
                   )}
                 </div>
 
                 <div className="bg-gray-100 rounded-lg p-4 mb-4 min-h-[120px] flex items-center justify-center">
-                  {currentStream ? (
+                  {currentVideo ? (
                     <div className="text-center w-full">
-                      <div className="bg-gradient-to-br from-blue-500 to-purple-600 rounded-lg aspect-video flex items-center justify-center mb-2 relative overflow-hidden">
+                      <div className="bg-gradient-to-br from-red-500 to-pink-600 rounded-lg aspect-video flex items-center justify-center mb-2 relative overflow-hidden">
                         <div className="absolute inset-0 bg-black bg-opacity-20"></div>
                         <div className="text-white text-center relative z-10">
-                          <div className="animate-pulse bg-red-500 rounded-full w-4 h-4 mx-auto mb-2"></div>
-                          <p className="text-sm">Connected to Live Feed</p>
-                          <p className="text-xs text-gray-200">Watching your vehicle service</p>
+                          <Youtube className="w-8 h-8 mx-auto mb-2" />
+                          <p className="text-sm">YouTube Video Playing</p>
+                          <p className="text-xs text-gray-200">Car Service Educational Video</p>
                         </div>
                       </div>
                       <button
-                        onClick={handleStopLiveView}
+                        onClick={handleStopVideo}
                         className="flex items-center space-x-2 bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 transition duration-200 mx-auto"
                       >
                         <Pause className="w-4 h-4" />
@@ -1004,49 +520,30 @@ export default function VehicleServiceDashboard() {
                     </div>
                   ) : (
                     <div className="text-center">
-                      <Video className="w-8 h-8 text-gray-400 mx-auto mb-2" />
-                      <p className="text-gray-500">Live feed will appear here when activated</p>
+                      <Youtube className="w-8 h-8 text-gray-400 mx-auto mb-2" />
+                      <p className="text-gray-500">Watch car service educational video</p>
                       <p className="text-xs text-gray-400 mt-1">
-                        Available for in-progress services with active streams
+                        Learn about professional car service procedures
                       </p>
-                      {activeStreams.length === 0 && (
-                        <button
-                          onClick={fetchActiveStreams}
-                          className="mt-2 text-xs bg-blue-600 text-white px-3 py-1 rounded hover:bg-blue-700"
-                        >
-                          Check for Streams
-                        </button>
-                      )}
+                      <button
+                        onClick={handleWatchVideo}
+                        className="mt-3 flex items-center space-x-2 bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 transition duration-200 mx-auto"
+                      >
+                        <Play className="w-4 h-4" />
+                        <span>Watch Video</span>
+                      </button>
                     </div>
                   )}
                 </div>
 
-                {/* Active Streams List */}
-                {activeStreams.length > 0 && !currentStream && (
-                  <div className="mt-4">
-                    <h4 className="font-semibold text-gray-700 mb-2">Available Streams:</h4>
-                    <div className="space-y-2">
-                      {activeStreams.map(stream => (
-                        <div key={stream.id} className="flex items-center justify-between p-2 bg-blue-50 rounded">
-                          <div>
-                            <p className="text-sm font-medium">Appointment #{stream.appointmentId}</p>
-                            <p className="text-xs text-gray-600">{stream.providerName}</p>
-                            <p className="text-xs text-gray-500 capitalize">Status: {stream.status}</p>
-                          </div>
-                          <button
-                            onClick={() => {
-                              addDebugLog(`🎯 User clicked Watch for stream ${stream.appointmentId}`);
-                              handleRequestLiveView(stream.appointmentId);
-                            }}
-                            className="text-xs bg-blue-600 text-white px-2 py-1 rounded hover:bg-blue-700"
-                          >
-                            Watch
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
+                {/* Video Description */}
+                <div className="mt-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
+                  <h4 className="font-semibold text-blue-800 mb-2">About This Video</h4>
+                  <p className="text-sm text-blue-700">
+                    This educational video demonstrates professional car service procedures, 
+                    maintenance tips, and best practices for vehicle care.
+                  </p>
+                </div>
               </div>
             </div>
 
@@ -1086,11 +583,8 @@ export default function VehicleServiceDashboard() {
         </div>
       </div>
 
-      {/* Video Stream Modal */}
-      <VideoStreamModal />
-
-      {/* Debug Panel */}
-      <DebugPanel />
+      {/* YouTube Video Modal */}
+      <YouTubeVideoModal />
     </div>
   );
 }

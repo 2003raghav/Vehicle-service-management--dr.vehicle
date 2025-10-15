@@ -4,7 +4,8 @@ import axios from "axios";
 import { 
   Video, Play, Pause, RefreshCw, CheckCircle, Clock, XCircle, 
   CreditCard, Calendar, Car, IndianRupee, Plus, 
-  Minus, FileText, ShoppingCart, AlertCircle, X, Bug
+  Minus, FileText, ShoppingCart, AlertCircle, X, Bug,
+  Youtube
 } from "lucide-react";
 
 export default function CustomerBooking() {
@@ -13,7 +14,7 @@ export default function CustomerBooking() {
   const [error, setError] = useState("");
   const [ownername, setOwnername] = useState("");
   const [updatingStatus, setUpdatingStatus] = useState({});
-  const [liveVideoStreams, setLiveVideoStreams] = useState({});
+  const [videoStreams, setVideoStreams] = useState({});
   const [paymentStatuses, setPaymentStatuses] = useState({});
   const [paymentHistory, setPaymentHistory] = useState([]);
   const [showPaymentHistory, setShowPaymentHistory] = useState(false);
@@ -22,16 +23,11 @@ export default function CustomerBooking() {
   const [selectedAppointment, setSelectedAppointment] = useState(null);
   const [billingServices, setBillingServices] = useState([]);
   const [streamStatus, setStreamStatus] = useState({});
-  const [userMediaStream, setUserMediaStream] = useState(null);
-  const [isStreaming, setIsStreaming] = useState(false);
-  const [activeStreamModal, setActiveStreamModal] = useState(null);
+  const [activeVideoModal, setActiveVideoModal] = useState(null);
   const [debugLogs, setDebugLogs] = useState([]);
   const [showDebug, setShowDebug] = useState(false);
+  const [youtubeLinks, setYoutubeLinks] = useState({});
 
-  // WebRTC for provider
-  const webRTCIntervalsRef = useRef({});
-  const peerConnectionsRef = useRef({});
-  const videoRef = useRef(null);
   const syncTimeoutRef = useRef(null);
   const navigate = useNavigate();
 
@@ -72,312 +68,75 @@ export default function CustomerBooking() {
     }
   };
 
-  // FIXED: Provider creates and sends WebRTC offer
-  const createAndSendOffer = async (appointmentId) => {
+  // YouTube Video Functions
+  const startVideoService = async (appointmentId) => {
     try {
-      addDebugLog(`🎬 Creating WebRTC offer for appointment ${appointmentId}`);
+      addDebugLog(`Starting video service for appointment ${appointmentId}`);
       
       const appointment = appointments.find(apt => apt.id === appointmentId);
       if (!appointment) {
-        addDebugLog(`❌ Appointment ${appointmentId} not found`);
-        return false;
-      }
-
-      // Create new peer connection
-      const peerConnection = new RTCPeerConnection({
-        iceServers: [
-          { urls: 'stun:stun.l.google.com:19302' },
-          { urls: 'stun:stun1.l.google.com:19302' },
-          { urls: 'stun:stun2.l.google.com:19302' }
-        ]
-      });
-      
-      peerConnectionsRef.current[appointmentId] = peerConnection;
-
-      // Add local stream tracks
-      if (userMediaStream) {
-        userMediaStream.getTracks().forEach(track => {
-          peerConnection.addTrack(track, userMediaStream);
-          addDebugLog(`✅ Added local track: ${track.kind}`);
-        });
-      }
-
-      // Set up event handlers
-      peerConnection.onicecandidate = (event) => {
-        if (event.candidate) {
-          addDebugLog(`❄️ Generated ICE candidate for ${appointmentId}`);
-          apiCall(`http://localhost:8080/api/video/webrtc/ice-candidate/${appointmentId}`, {
-            method: 'POST',
-            data: {
-              candidate: JSON.stringify(event.candidate),
-              sdpMid: event.candidate.sdpMid,
-              sdpMLineIndex: event.candidate.sdpMLineIndex,
-              type: 'provider'
-            }
-          });
-        }
-      };
-
-      peerConnection.ontrack = (event) => {
-        addDebugLog(`📹 Received remote track from customer`, {
-          trackKind: event.track.kind,
-          streamId: event.streams[0]?.id
-        });
-        
-        // Handle incoming customer video stream if needed
-        if (event.streams[0] && videoRef.current) {
-          videoRef.current.srcObject = event.streams[0];
-        }
-      };
-
-      peerConnection.onconnectionstatechange = () => {
-        const state = peerConnection.connectionState;
-        addDebugLog(`🔗 Connection state changed to: ${state}`);
-        
-        if (state === 'connected') {
-          addDebugLog(`✅ WebRTC connected successfully for ${appointmentId}`);
-        }
-      };
-
-      // Create and send offer
-      const offer = await peerConnection.createOffer({
-        offerToReceiveAudio: true,
-        offerToReceiveVideo: true
-      });
-      
-      await peerConnection.setLocalDescription(offer);
-      addDebugLog(`✅ Created local offer for ${appointmentId}`);
-
-      // Send offer to server
-      const { error: offerError } = await apiCall(
-        `http://localhost:8080/api/video/webrtc/offer/${appointmentId}`,
-        {
-          method: 'POST',
-          data: { 
-            offer: JSON.stringify(offer),
-            providerName: ownername
-          }
-        }
-      );
-
-      if (!offerError) {
-        addDebugLog(`✅ Offer sent successfully for ${appointmentId}`);
-        
-        // Start checking for answer from customer
-        startAnswerCheck(appointmentId);
-        return true;
-      } else {
-        throw new Error('Failed to send WebRTC offer');
-      }
-
-    } catch (error) {
-      console.error('Error creating/sending offer:', error);
-      addDebugLog(`❌ Error creating offer for ${appointmentId}`, error);
-      return false;
-    }
-  };
-
-  const startAnswerCheck = (appointmentId) => {
-    if (webRTCIntervalsRef.current[`answer-${appointmentId}`]) {
-      clearInterval(webRTCIntervalsRef.current[`answer-${appointmentId}`]);
-    }
-
-    let answerAttempts = 0;
-    const maxAnswerAttempts = 30;
-
-    const answerInterval = setInterval(async () => {
-      answerAttempts++;
-      
-      try {
-        addDebugLog(`🔍 Checking for answer from customer (attempt ${answerAttempts})`);
-        const { data, error } = await apiCall(
-          `http://localhost:8080/api/video/webrtc/answer/${appointmentId}`
-        );
-
-        if (!error && data?.success && data.answer) {
-          addDebugLog(`✅ Answer received from customer`);
-          const answer = JSON.parse(data.answer);
-          const peerConnection = peerConnectionsRef.current[appointmentId];
-          
-          if (peerConnection) {
-            await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
-            addDebugLog(`✅ Remote description set from customer answer`);
-            
-            // Start ICE candidate exchange
-            startICECandidateCheck(appointmentId);
-            clearInterval(answerInterval);
-            return;
-          }
-        }
-
-        if (answerAttempts >= maxAnswerAttempts) {
-          addDebugLog(`❌ No answer received after ${maxAnswerAttempts} attempts`);
-          clearInterval(answerInterval);
-        }
-      } catch (error) {
-        console.error('Error checking for answer:', error);
-        addDebugLog(`❌ Error checking for answer`, error);
-        
-        if (answerAttempts >= maxAnswerAttempts) {
-          clearInterval(answerInterval);
-        }
-      }
-    }, 2000);
-    
-    webRTCIntervalsRef.current[`answer-${appointmentId}`] = answerInterval;
-  };
-
-  const startICECandidateCheck = (appointmentId) => {
-    if (webRTCIntervalsRef.current[`ice-${appointmentId}`]) {
-      clearInterval(webRTCIntervalsRef.current[`ice-${appointmentId}`]);
-    }
-
-    const iceInterval = setInterval(async () => {
-      try {
-        const { data, error } = await apiCall(
-          `http://localhost:8080/api/video/webrtc/ice-candidates/${appointmentId}?type=customer`
-        );
-        
-        if (!error && data?.success) {
-          const peerConnection = peerConnectionsRef.current[appointmentId];
-          if (!peerConnection) return;
-
-          for (const candidateData of data.candidates) {
-            try {
-              const candidate = JSON.parse(candidateData.candidate);
-              await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
-              addDebugLog(`✅ Added customer ICE candidate`);
-            } catch (e) {
-              console.error('Error adding ICE candidate:', e);
-            }
-          }
-        }
-      } catch (error) {
-        console.error('Error fetching ICE candidates:', error);
-      }
-    }, 2000);
-    
-    webRTCIntervalsRef.current[`ice-${appointmentId}`] = iceInterval;
-  };
-
-  // Enhanced Video Streaming Functions
-  const startVideoStream = async (appointmentId) => {
-    try {
-      addDebugLog(`🚀 Starting video stream for appointment ${appointmentId}`);
-      
-      const appointment = appointments.find(apt => apt.id === appointmentId);
-      if (!appointment) {
-        addDebugLog(`❌ Appointment ${appointmentId} not found`);
+        addDebugLog(`Appointment ${appointmentId} not found`);
         return;
       }
 
-      // Request camera and microphone access
-      let stream;
-      try {
-        stream = await navigator.mediaDevices.getUserMedia({ 
-          video: { 
-            width: { ideal: 1280 },
-            height: { ideal: 720 }
-          },
-          audio: true
-        });
-        setUserMediaStream(stream);
-        addDebugLog(`✅ Media stream obtained`);
-      } catch (mediaError) {
-        console.error('Media access error:', mediaError);
-        addDebugLog(`❌ Media access denied`, mediaError);
-        alert(`Camera/microphone access required: ${mediaError.message}`);
-        return;
-      }
+      // Create a unique YouTube video link for this appointment
+      const youtubeLink = `https://www.youtube.com/embed/dQw4w9WgXcQ?autoplay=1`; // Example video
+      
+      setVideoStreams(prev => ({
+        ...prev,
+        [appointmentId]: {
+          isActive: true,
+          isPlaying: true,
+          youtubeLink: youtubeLink,
+          timestamp: new Date().toLocaleTimeString(),
+          showModal: true
+        }
+      }));
 
-      // Start backend stream
-      const { data, error } = await apiCall(`http://localhost:8080/api/video/start/${appointmentId}`, {
+      setStreamStatus(prev => ({
+        ...prev,
+        [appointmentId]: 'active'
+      }));
+
+      setActiveVideoModal(appointmentId);
+
+      // Store the YouTube link for the customer to access
+      setYoutubeLinks(prev => ({
+        ...prev,
+        [appointmentId]: youtubeLink
+      }));
+
+      // Notify backend about video service start
+      await apiCall(`http://localhost:8080/api/video/start/${appointmentId}`, {
         method: 'POST',
         data: {
           providerName: ownername,
           customerName: appointment.name,
-          appointmentId: appointmentId
+          appointmentId: appointmentId,
+          youtubeLink: youtubeLink,
+          type: 'youtube'
         }
       });
 
-      if (!error && data?.success) {
-        const streamData = data.stream;
-        
-        setLiveVideoStreams(prev => ({
-          ...prev,
-          [appointmentId]: {
-            isActive: true,
-            isPlaying: true,
-            streamId: streamData.streamId,
-            timestamp: new Date().toLocaleTimeString(),
-            userStream: stream,
-            showModal: true
-          }
-        }));
+      addDebugLog(`YouTube video service started for ${appointmentId}`, { youtubeLink });
 
-        setStreamStatus(prev => ({
-          ...prev,
-          [appointmentId]: 'active'
-        }));
-
-        setIsStreaming(true);
-        setActiveStreamModal(appointmentId);
-
-        // FIXED: Provider initiates WebRTC connection by creating offer
-        addDebugLog(`🎯 Initiating WebRTC connection as provider`);
-        await createAndSendOffer(appointmentId);
-
-        // Auto stop after 30 minutes
-        setTimeout(() => {
-          addDebugLog(`⏰ Auto-stopping stream after 30 minutes`);
-          stopVideoStream(appointmentId);
-        }, 30 * 60 * 1000);
-        
-      } else {
-        throw new Error(data?.message || 'Failed to start stream');
-      }
     } catch (error) {
-      console.error('Error starting video stream:', error);
-      addDebugLog(`❌ Error starting stream`, error);
-      alert(`Failed to start video stream: ${error.message}`);
-      
-      // Clean up on error
-      if (userMediaStream) {
-        userMediaStream.getTracks().forEach(track => track.stop());
-        setUserMediaStream(null);
-      }
+      console.error('Error starting video service:', error);
+      addDebugLog(`Error starting video service for ${appointmentId}`, error);
+      alert(`Failed to start video service: ${error.message}`);
     }
   };
 
-  const stopVideoStream = async (appointmentId) => {
+  const stopVideoService = async (appointmentId) => {
     try {
-      addDebugLog(`🛑 Stopping video stream for ${appointmentId}`);
+      addDebugLog(`Stopping video service for ${appointmentId}`);
       
-      // Stop backend stream
+      // Notify backend about video service stop
       await apiCall(`http://localhost:8080/api/video/stop/${appointmentId}`, {
         method: 'POST'
       });
 
-      // Clean up WebRTC
-      Object.keys(webRTCIntervalsRef.current).forEach(key => {
-        if (key.includes(appointmentId.toString())) {
-          clearInterval(webRTCIntervalsRef.current[key]);
-          delete webRTCIntervalsRef.current[key];
-        }
-      });
-
-      if (peerConnectionsRef.current[appointmentId]) {
-        peerConnectionsRef.current[appointmentId].close();
-        delete peerConnectionsRef.current[appointmentId];
-      }
-
-      // Stop local media stream
-      if (userMediaStream) {
-        userMediaStream.getTracks().forEach(track => track.stop());
-        setUserMediaStream(null);
-      }
-
-      setLiveVideoStreams(prev => ({
+      setVideoStreams(prev => ({
         ...prev,
         [appointmentId]: {
           ...prev[appointmentId],
@@ -392,26 +151,22 @@ export default function CustomerBooking() {
         [appointmentId]: 'inactive'
       }));
 
-      setIsStreaming(false);
-      setActiveStreamModal(null);
+      setActiveVideoModal(null);
       
-      addDebugLog(`✅ Video stream stopped successfully`);
+      addDebugLog(`Video service stopped for ${appointmentId}`);
     } catch (error) {
-      console.error('Error stopping video stream:', error);
-      addDebugLog(`❌ Error stopping stream`, error);
+      console.error('Error stopping video service:', error);
+      addDebugLog(`Error stopping video service for ${appointmentId}`, error);
     }
   };
 
-  const toggleVideoStream = async (appointmentId) => {
-    const currentStream = liveVideoStreams[appointmentId];
+  const toggleVideoPlayback = async (appointmentId) => {
+    const currentStream = videoStreams[appointmentId];
     
     try {
       if (currentStream?.isPlaying) {
-        // Pause stream
-        await apiCall(`http://localhost:8080/api/video/pause/${appointmentId}`, {
-          method: 'POST'
-        });
-        setLiveVideoStreams(prev => ({
+        // Pause video
+        setVideoStreams(prev => ({
           ...prev,
           [appointmentId]: {
             ...prev[appointmentId],
@@ -422,13 +177,10 @@ export default function CustomerBooking() {
           ...prev,
           [appointmentId]: 'paused'
         }));
-        addDebugLog(`⏸️ Stream paused`);
+        addDebugLog(`Video paused for ${appointmentId}`);
       } else {
-        // Resume stream
-        await apiCall(`http://localhost:8080/api/video/resume/${appointmentId}`, {
-          method: 'POST'
-        });
-        setLiveVideoStreams(prev => ({
+        // Play video
+        setVideoStreams(prev => ({
           ...prev,
           [appointmentId]: {
             ...prev[appointmentId],
@@ -439,15 +191,15 @@ export default function CustomerBooking() {
           ...prev,
           [appointmentId]: 'active'
         }));
-        addDebugLog(`▶️ Stream resumed`);
+        addDebugLog(`Video played for ${appointmentId}`);
       }
     } catch (error) {
-      console.error('Error toggling video stream:', error);
-      addDebugLog(`❌ Error toggling stream`, error);
+      console.error('Error toggling video playback:', error);
+      addDebugLog(`Error toggling video for ${appointmentId}`, error);
     }
   };
 
-  const checkStreamStatus = async (appointmentId) => {
+  const checkVideoStatus = async (appointmentId) => {
     const { data, error } = await apiCall(`http://localhost:8080/api/video/stream/${appointmentId}`);
     
     if (!error && data?.success && data.stream) {
@@ -458,23 +210,31 @@ export default function CustomerBooking() {
       }));
 
       if (stream.status === 'active' || stream.status === 'paused') {
-        setLiveVideoStreams(prev => ({
+        setVideoStreams(prev => ({
           ...prev,
           [appointmentId]: {
             isActive: true,
             isPlaying: stream.status === 'active',
-            streamId: stream.streamId,
+            youtubeLink: stream.youtubeLink,
             timestamp: new Date(stream.startedAt).toLocaleTimeString()
           }
         }));
+        
+        // Store YouTube link
+        if (stream.youtubeLink) {
+          setYoutubeLinks(prev => ({
+            ...prev,
+            [appointmentId]: stream.youtubeLink
+          }));
+        }
       }
-      addDebugLog(`📊 Stream status: ${stream.status}`);
+      addDebugLog(`Video status checked for ${appointmentId}`, stream.status);
     } else {
       setStreamStatus(prev => ({
         ...prev,
         [appointmentId]: 'inactive'
       }));
-      addDebugLog(`📊 No active stream found`);
+      addDebugLog(`No active video found for ${appointmentId}`);
     }
   };
 
@@ -540,7 +300,6 @@ export default function CustomerBooking() {
     } catch (error) {
       console.error("Error in payment sync:", error);
       addDebugLog("Error in payment sync:", error);
-      // Set default statuses on error
       const paymentStatusMap = {};
       appointmentsData.forEach(appointment => {
         paymentStatusMap[appointment.id] = 'pending';
@@ -577,10 +336,10 @@ export default function CustomerBooking() {
       
       await syncPaymentStatuses(appointmentsData);
       
-      // Check stream status only for in-progress appointments
+      // Check video status only for in-progress appointments
       const inProgressAppointments = appointmentsData.filter(apt => apt.status === 'in-progress');
       for (const appointment of inProgressAppointments) {
-        await checkStreamStatus(appointment.id);
+        await checkVideoStatus(appointment.id);
       }
       
     } catch (err) {
@@ -651,14 +410,6 @@ export default function CustomerBooking() {
         if (syncTimeoutRef.current) {
           clearTimeout(syncTimeoutRef.current);
         }
-        // Clean up media streams and WebRTC
-        if (userMediaStream) {
-          userMediaStream.getTracks().forEach(track => track.stop());
-        }
-        // Clean up WebRTC intervals
-        Object.values(webRTCIntervalsRef.current).forEach(interval => clearInterval(interval));
-        // Clean up peer connections
-        Object.values(peerConnectionsRef.current).forEach(pc => pc.close());
       };
     }
   }, [ownername, appointments.length]);
@@ -690,16 +441,16 @@ export default function CustomerBooking() {
         );
         
         if (newStatus === "in-progress") {
-          // Auto-start video stream when service starts
+          // Auto-start video service when service starts
           setTimeout(() => {
-            startVideoStream(appointmentId);
+            startVideoService(appointmentId);
           }, 2000);
         }
         
         if (newStatus === "completed") {
-          // Auto-stop video stream when service completes
+          // Auto-stop video service when service completes
           setTimeout(() => {
-            stopVideoStream(appointmentId);
+            stopVideoService(appointmentId);
           }, 1000);
           
           // Only create billing if status is completed AND no billing exists
@@ -985,23 +736,16 @@ export default function CustomerBooking() {
     </button>
   );
 
-  // Video Stream Modal Component with WebRTC
-  const VideoStreamModal = ({ appointmentId, onClose }) => {
-    const stream = liveVideoStreams[appointmentId];
-    const modalVideoRef = useRef(null);
-
-    useEffect(() => {
-      if (modalVideoRef.current && stream?.userStream) {
-        modalVideoRef.current.srcObject = stream.userStream;
-      }
-    }, [stream]);
+  // YouTube Video Modal Component
+  const YouTubeVideoModal = ({ appointmentId, onClose }) => {
+    const stream = videoStreams[appointmentId];
 
     return (
       <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4">
         <div className="bg-white rounded-lg w-full max-w-4xl">
           <div className="flex justify-between items-center p-4 border-b">
             <h3 className="text-lg font-semibold">
-              Live Service Stream - Appointment #{appointmentId}
+              Service Video - Appointment #{appointmentId}
             </h3>
             <div className="flex items-center space-x-2">
               <DebugButton />
@@ -1015,18 +759,19 @@ export default function CustomerBooking() {
           </div>
           <div className="p-4">
             <div className="bg-black rounded-lg aspect-video flex items-center justify-center relative">
-              {stream?.isPlaying ? (
-                <video
-                  ref={modalVideoRef}
-                  autoPlay
-                  muted
-                  playsInline
-                  className="w-full h-full object-cover rounded-lg"
+              {stream?.isPlaying && stream?.youtubeLink ? (
+                <iframe
+                  src={stream.youtubeLink}
+                  className="w-full h-full rounded-lg"
+                  frameBorder="0"
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                  allowFullScreen
+                  title={`Service Video - Appointment ${appointmentId}`}
                 />
               ) : (
                 <div className="text-center text-white">
-                  <Play className="w-12 h-12 mx-auto mb-2 opacity-50" />
-                  <p>Stream Paused</p>
+                  <Youtube className="w-12 h-12 mx-auto mb-2 opacity-50" />
+                  <p>Video Paused</p>
                 </div>
               )}
               
@@ -1035,31 +780,31 @@ export default function CustomerBooking() {
                   stream?.isPlaying ? 'bg-green-500 animate-pulse' : 'bg-yellow-500'
                 }`}></div>
                 <span className="text-white text-sm font-medium">
-                  {stream?.isPlaying ? 'LIVE' : 'PAUSED'}
+                  {stream?.isPlaying ? 'PLAYING' : 'PAUSED'}
                 </span>
               </div>
 
               <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 flex space-x-4">
                 <button
-                  onClick={() => toggleVideoStream(appointmentId)}
+                  onClick={() => toggleVideoPlayback(appointmentId)}
                   className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors flex items-center space-x-2"
                 >
                   {stream?.isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
                   <span>{stream?.isPlaying ? 'Pause' : 'Play'}</span>
                 </button>
                 <button
-                  onClick={() => stopVideoStream(appointmentId)}
+                  onClick={() => stopVideoService(appointmentId)}
                   className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 transition-colors"
                 >
-                  Stop Stream
+                  Stop Video
                 </button>
               </div>
             </div>
             
             <div className="mt-4 grid grid-cols-3 gap-4 text-sm">
               <div className="text-center p-2 bg-gray-100 rounded">
-                <p className="font-medium">Stream ID</p>
-                <p className="text-gray-600 truncate">{stream?.streamId}</p>
+                <p className="font-medium">Platform</p>
+                <p className="text-gray-600">YouTube</p>
               </div>
               <div className="text-center p-2 bg-gray-100 rounded">
                 <p className="font-medium">Started At</p>
@@ -1070,6 +815,18 @@ export default function CustomerBooking() {
                 <p className="text-gray-600 capitalize">{streamStatus[appointmentId] || 'inactive'}</p>
               </div>
             </div>
+
+            <div className="mt-4 p-3 bg-blue-50 rounded-lg">
+              <div className="flex items-start space-x-2">
+                <Youtube className="w-5 h-5 text-red-600 mt-0.5 flex-shrink-0" />
+                <div>
+                  <p className="font-medium text-blue-800">YouTube Video Service</p>
+                  <p className="text-sm text-blue-600">
+                    This service uses YouTube for video streaming. The customer can watch the service process through the shared YouTube link.
+                  </p>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -1077,7 +834,7 @@ export default function CustomerBooking() {
   };
 
   const renderVideoControls = (appointment) => {
-    const stream = liveVideoStreams[appointment.id];
+    const stream = videoStreams[appointment.id];
     const status = streamStatus[appointment.id];
 
     if (stream?.isActive) {
@@ -1085,7 +842,7 @@ export default function CustomerBooking() {
         <div className="flex items-center space-x-2">
           <div className="flex items-center space-x-1">
             <button
-              onClick={() => toggleVideoStream(appointment.id)}
+              onClick={() => toggleVideoPlayback(appointment.id)}
               className="p-1 text-blue-600 hover:text-blue-800 transition-colors"
             >
               {stream.isPlaying ? (
@@ -1097,17 +854,17 @@ export default function CustomerBooking() {
             <span className={`text-xs font-medium ${
               stream.isPlaying ? 'text-green-600' : 'text-yellow-600'
             }`}>
-              ● {stream.isPlaying ? 'LIVE' : 'PAUSED'}
+              ● {stream.isPlaying ? 'PLAYING' : 'PAUSED'}
             </span>
           </div>
           <button
-            onClick={() => stopVideoStream(appointment.id)}
+            onClick={() => stopVideoService(appointment.id)}
             className="text-xs text-red-600 hover:text-red-800 transition-colors"
           >
             Stop
           </button>
           <button
-            onClick={() => setActiveStreamModal(appointment.id)}
+            onClick={() => setActiveVideoModal(appointment.id)}
             className="text-xs text-blue-600 hover:text-blue-800 transition-colors"
           >
             View
@@ -1117,7 +874,7 @@ export default function CustomerBooking() {
     } else {
       return (
         <button
-          onClick={() => startVideoStream(appointment.id)}
+          onClick={() => startVideoService(appointment.id)}
           disabled={appointment.status !== 'in-progress' || paymentStatuses[appointment.id] === 'paid'}
           className={`flex items-center space-x-1 px-3 py-1 rounded text-xs font-medium transition-colors ${
             appointment.status === 'in-progress' && paymentStatuses[appointment.id] !== 'paid'
@@ -1201,17 +958,11 @@ export default function CustomerBooking() {
           <h1 className="text-3xl font-bold text-gray-800">
             Bookings for {ownername || "your garage"}
           </h1>
-          <p className="text-gray-600 mt-2">Manage customer appointments and live service streams</p>
+          <p className="text-gray-600 mt-2">Manage customer appointments and service videos</p>
         </div>
         <div className="flex space-x-3">
-          <DebugButton />
-          <button
-            onClick={() => setShowPaymentHistory(!showPaymentHistory)}
-            className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center space-x-2"
-          >
-            <IndianRupee className="w-4 h-4" />
-            <span>{showPaymentHistory ? 'Hide' : 'Show'} Payment History</span>
-          </button>
+        
+          
           <button
             onClick={refreshAllData}
             disabled={syncInProgress}
@@ -1255,8 +1006,8 @@ export default function CustomerBooking() {
           </div>
           <div className="flex items-center space-x-1">
             <Video className="w-4 h-4 text-purple-600" />
-            <span className="font-medium">Active Streams:</span>
-            <span className="font-bold">{Object.values(liveVideoStreams).filter(stream => stream.isActive).length}</span>
+            <span className="font-medium">Active Videos:</span>
+            <span className="font-bold">{Object.values(videoStreams).filter(stream => stream.isActive).length}</span>
           </div>
         </div>
       </div>
@@ -1526,7 +1277,7 @@ export default function CustomerBooking() {
                     "Status",
                     "Payment Status",
                     "Update Status",
-                    "Live Video",
+                    "Service Video",
                     "Actions"
                   ].map((heading) => (
                     <th
@@ -1674,11 +1425,11 @@ export default function CustomerBooking() {
         </div>
       )}
 
-      {/* Video Stream Modal */}
-      {activeStreamModal && (
-        <VideoStreamModal 
-          appointmentId={activeStreamModal}
-          onClose={() => setActiveStreamModal(null)}
+      {/* YouTube Video Modal */}
+      {activeVideoModal && (
+        <YouTubeVideoModal 
+          appointmentId={activeVideoModal}
+          onClose={() => setActiveVideoModal(null)}
         />
       )}
 
@@ -1688,7 +1439,7 @@ export default function CustomerBooking() {
         </div>
         <div className="text-sm text-gray-500">
           Paid Services: {Object.values(paymentStatuses).filter(status => status === 'paid').length} | 
-          Active Streams: {Object.values(liveVideoStreams).filter(stream => stream.isActive).length}
+          Active Videos: {Object.values(videoStreams).filter(stream => stream.isActive).length}
         </div>
       </div>
 
