@@ -1,7 +1,11 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom"; 
 import axios from "axios";
-import { Video, Play, Pause, RefreshCw, CheckCircle, Clock, XCircle, CreditCard, DollarSign, Calendar, Car } from "lucide-react";
+import { 
+  Video, Play, Pause, RefreshCw, CheckCircle, Clock, XCircle, 
+  CreditCard, Calendar, Car, IndianRupee, Plus, 
+  Minus, FileText, ShoppingCart, AlertCircle, X, Bug
+} from "lucide-react";
 
 export default function CustomerBooking() {
   const [appointments, setAppointments] = useState([]);
@@ -13,10 +17,540 @@ export default function CustomerBooking() {
   const [paymentStatuses, setPaymentStatuses] = useState({});
   const [paymentHistory, setPaymentHistory] = useState([]);
   const [showPaymentHistory, setShowPaymentHistory] = useState(false);
+  const [syncInProgress, setSyncInProgress] = useState(false);
+  const [showBillingModal, setShowBillingModal] = useState(false);
+  const [selectedAppointment, setSelectedAppointment] = useState(null);
+  const [billingServices, setBillingServices] = useState([]);
+  const [streamStatus, setStreamStatus] = useState({});
+  const [userMediaStream, setUserMediaStream] = useState(null);
+  const [isStreaming, setIsStreaming] = useState(false);
+  const [activeStreamModal, setActiveStreamModal] = useState(null);
+  const [debugLogs, setDebugLogs] = useState([]);
+  const [showDebug, setShowDebug] = useState(false);
 
+  // WebRTC for provider
+  const webRTCIntervalsRef = useRef({});
+  const peerConnectionsRef = useRef({});
+  const videoRef = useRef(null);
+  const syncTimeoutRef = useRef(null);
   const navigate = useNavigate();
 
-  // Fetch appointments from Spring Boot
+  const availableServices = [
+    { id: 1, name: "Oil Change", price: 1500, category: "Maintenance" },
+    { id: 2, name: "Tire Rotation", price: 1200, category: "Maintenance" },
+    { id: 3, name: "Brake Service", price: 3500, category: "Repair" },
+    { id: 4, name: "Engine Diagnostic", price: 2500, category: "Diagnostic" },
+    { id: 5, name: "General Maintenance", price: 1800, category: "Maintenance" },
+    { id: 6, name: "AC Service", price: 2000, category: "Comfort" },
+    { id: 7, name: "Battery Replacement", price: 4000, category: "Electrical" },
+    { id: 8, name: "Wheel Alignment", price: 2200, category: "Suspension" }
+  ];
+
+  // Debug logging function
+  const addDebugLog = (message, data = null) => {
+    const timestamp = new Date().toLocaleTimeString();
+    const log = { timestamp, message, data };
+    setDebugLogs(prev => [log, ...prev.slice(0, 49)]);
+    console.log(`🔧 [Provider - ${timestamp}] ${message}`, data);
+  };
+
+  // Enhanced API call with error handling
+  const apiCall = async (url, options = {}) => {
+    try {
+      addDebugLog(`API Call: ${url}`, options);
+      const response = await axios({
+        url,
+        timeout: 10000,
+        ...options
+      });
+      addDebugLog(`API Success: ${url}`, response.data);
+      return { data: response.data, error: null };
+    } catch (error) {
+      addDebugLog(`API Error: ${url}`, error.message);
+      console.warn(`API call failed for ${url}:`, error.message);
+      return { data: null, error };
+    }
+  };
+
+  // FIXED: Provider creates and sends WebRTC offer
+  const createAndSendOffer = async (appointmentId) => {
+    try {
+      addDebugLog(`🎬 Creating WebRTC offer for appointment ${appointmentId}`);
+      
+      const appointment = appointments.find(apt => apt.id === appointmentId);
+      if (!appointment) {
+        addDebugLog(`❌ Appointment ${appointmentId} not found`);
+        return false;
+      }
+
+      // Create new peer connection
+      const peerConnection = new RTCPeerConnection({
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' },
+          { urls: 'stun:stun1.l.google.com:19302' },
+          { urls: 'stun:stun2.l.google.com:19302' }
+        ]
+      });
+      
+      peerConnectionsRef.current[appointmentId] = peerConnection;
+
+      // Add local stream tracks
+      if (userMediaStream) {
+        userMediaStream.getTracks().forEach(track => {
+          peerConnection.addTrack(track, userMediaStream);
+          addDebugLog(`✅ Added local track: ${track.kind}`);
+        });
+      }
+
+      // Set up event handlers
+      peerConnection.onicecandidate = (event) => {
+        if (event.candidate) {
+          addDebugLog(`❄️ Generated ICE candidate for ${appointmentId}`);
+          apiCall(`http://localhost:8080/api/video/webrtc/ice-candidate/${appointmentId}`, {
+            method: 'POST',
+            data: {
+              candidate: JSON.stringify(event.candidate),
+              sdpMid: event.candidate.sdpMid,
+              sdpMLineIndex: event.candidate.sdpMLineIndex,
+              type: 'provider'
+            }
+          });
+        }
+      };
+
+      peerConnection.ontrack = (event) => {
+        addDebugLog(`📹 Received remote track from customer`, {
+          trackKind: event.track.kind,
+          streamId: event.streams[0]?.id
+        });
+        
+        // Handle incoming customer video stream if needed
+        if (event.streams[0] && videoRef.current) {
+          videoRef.current.srcObject = event.streams[0];
+        }
+      };
+
+      peerConnection.onconnectionstatechange = () => {
+        const state = peerConnection.connectionState;
+        addDebugLog(`🔗 Connection state changed to: ${state}`);
+        
+        if (state === 'connected') {
+          addDebugLog(`✅ WebRTC connected successfully for ${appointmentId}`);
+        }
+      };
+
+      // Create and send offer
+      const offer = await peerConnection.createOffer({
+        offerToReceiveAudio: true,
+        offerToReceiveVideo: true
+      });
+      
+      await peerConnection.setLocalDescription(offer);
+      addDebugLog(`✅ Created local offer for ${appointmentId}`);
+
+      // Send offer to server
+      const { error: offerError } = await apiCall(
+        `http://localhost:8080/api/video/webrtc/offer/${appointmentId}`,
+        {
+          method: 'POST',
+          data: { 
+            offer: JSON.stringify(offer),
+            providerName: ownername
+          }
+        }
+      );
+
+      if (!offerError) {
+        addDebugLog(`✅ Offer sent successfully for ${appointmentId}`);
+        
+        // Start checking for answer from customer
+        startAnswerCheck(appointmentId);
+        return true;
+      } else {
+        throw new Error('Failed to send WebRTC offer');
+      }
+
+    } catch (error) {
+      console.error('Error creating/sending offer:', error);
+      addDebugLog(`❌ Error creating offer for ${appointmentId}`, error);
+      return false;
+    }
+  };
+
+  const startAnswerCheck = (appointmentId) => {
+    if (webRTCIntervalsRef.current[`answer-${appointmentId}`]) {
+      clearInterval(webRTCIntervalsRef.current[`answer-${appointmentId}`]);
+    }
+
+    let answerAttempts = 0;
+    const maxAnswerAttempts = 30;
+
+    const answerInterval = setInterval(async () => {
+      answerAttempts++;
+      
+      try {
+        addDebugLog(`🔍 Checking for answer from customer (attempt ${answerAttempts})`);
+        const { data, error } = await apiCall(
+          `http://localhost:8080/api/video/webrtc/answer/${appointmentId}`
+        );
+
+        if (!error && data?.success && data.answer) {
+          addDebugLog(`✅ Answer received from customer`);
+          const answer = JSON.parse(data.answer);
+          const peerConnection = peerConnectionsRef.current[appointmentId];
+          
+          if (peerConnection) {
+            await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+            addDebugLog(`✅ Remote description set from customer answer`);
+            
+            // Start ICE candidate exchange
+            startICECandidateCheck(appointmentId);
+            clearInterval(answerInterval);
+            return;
+          }
+        }
+
+        if (answerAttempts >= maxAnswerAttempts) {
+          addDebugLog(`❌ No answer received after ${maxAnswerAttempts} attempts`);
+          clearInterval(answerInterval);
+        }
+      } catch (error) {
+        console.error('Error checking for answer:', error);
+        addDebugLog(`❌ Error checking for answer`, error);
+        
+        if (answerAttempts >= maxAnswerAttempts) {
+          clearInterval(answerInterval);
+        }
+      }
+    }, 2000);
+    
+    webRTCIntervalsRef.current[`answer-${appointmentId}`] = answerInterval;
+  };
+
+  const startICECandidateCheck = (appointmentId) => {
+    if (webRTCIntervalsRef.current[`ice-${appointmentId}`]) {
+      clearInterval(webRTCIntervalsRef.current[`ice-${appointmentId}`]);
+    }
+
+    const iceInterval = setInterval(async () => {
+      try {
+        const { data, error } = await apiCall(
+          `http://localhost:8080/api/video/webrtc/ice-candidates/${appointmentId}?type=customer`
+        );
+        
+        if (!error && data?.success) {
+          const peerConnection = peerConnectionsRef.current[appointmentId];
+          if (!peerConnection) return;
+
+          for (const candidateData of data.candidates) {
+            try {
+              const candidate = JSON.parse(candidateData.candidate);
+              await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+              addDebugLog(`✅ Added customer ICE candidate`);
+            } catch (e) {
+              console.error('Error adding ICE candidate:', e);
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Error fetching ICE candidates:', error);
+      }
+    }, 2000);
+    
+    webRTCIntervalsRef.current[`ice-${appointmentId}`] = iceInterval;
+  };
+
+  // Enhanced Video Streaming Functions
+  const startVideoStream = async (appointmentId) => {
+    try {
+      addDebugLog(`🚀 Starting video stream for appointment ${appointmentId}`);
+      
+      const appointment = appointments.find(apt => apt.id === appointmentId);
+      if (!appointment) {
+        addDebugLog(`❌ Appointment ${appointmentId} not found`);
+        return;
+      }
+
+      // Request camera and microphone access
+      let stream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ 
+          video: { 
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
+          },
+          audio: true
+        });
+        setUserMediaStream(stream);
+        addDebugLog(`✅ Media stream obtained`);
+      } catch (mediaError) {
+        console.error('Media access error:', mediaError);
+        addDebugLog(`❌ Media access denied`, mediaError);
+        alert(`Camera/microphone access required: ${mediaError.message}`);
+        return;
+      }
+
+      // Start backend stream
+      const { data, error } = await apiCall(`http://localhost:8080/api/video/start/${appointmentId}`, {
+        method: 'POST',
+        data: {
+          providerName: ownername,
+          customerName: appointment.name,
+          appointmentId: appointmentId
+        }
+      });
+
+      if (!error && data?.success) {
+        const streamData = data.stream;
+        
+        setLiveVideoStreams(prev => ({
+          ...prev,
+          [appointmentId]: {
+            isActive: true,
+            isPlaying: true,
+            streamId: streamData.streamId,
+            timestamp: new Date().toLocaleTimeString(),
+            userStream: stream,
+            showModal: true
+          }
+        }));
+
+        setStreamStatus(prev => ({
+          ...prev,
+          [appointmentId]: 'active'
+        }));
+
+        setIsStreaming(true);
+        setActiveStreamModal(appointmentId);
+
+        // FIXED: Provider initiates WebRTC connection by creating offer
+        addDebugLog(`🎯 Initiating WebRTC connection as provider`);
+        await createAndSendOffer(appointmentId);
+
+        // Auto stop after 30 minutes
+        setTimeout(() => {
+          addDebugLog(`⏰ Auto-stopping stream after 30 minutes`);
+          stopVideoStream(appointmentId);
+        }, 30 * 60 * 1000);
+        
+      } else {
+        throw new Error(data?.message || 'Failed to start stream');
+      }
+    } catch (error) {
+      console.error('Error starting video stream:', error);
+      addDebugLog(`❌ Error starting stream`, error);
+      alert(`Failed to start video stream: ${error.message}`);
+      
+      // Clean up on error
+      if (userMediaStream) {
+        userMediaStream.getTracks().forEach(track => track.stop());
+        setUserMediaStream(null);
+      }
+    }
+  };
+
+  const stopVideoStream = async (appointmentId) => {
+    try {
+      addDebugLog(`🛑 Stopping video stream for ${appointmentId}`);
+      
+      // Stop backend stream
+      await apiCall(`http://localhost:8080/api/video/stop/${appointmentId}`, {
+        method: 'POST'
+      });
+
+      // Clean up WebRTC
+      Object.keys(webRTCIntervalsRef.current).forEach(key => {
+        if (key.includes(appointmentId.toString())) {
+          clearInterval(webRTCIntervalsRef.current[key]);
+          delete webRTCIntervalsRef.current[key];
+        }
+      });
+
+      if (peerConnectionsRef.current[appointmentId]) {
+        peerConnectionsRef.current[appointmentId].close();
+        delete peerConnectionsRef.current[appointmentId];
+      }
+
+      // Stop local media stream
+      if (userMediaStream) {
+        userMediaStream.getTracks().forEach(track => track.stop());
+        setUserMediaStream(null);
+      }
+
+      setLiveVideoStreams(prev => ({
+        ...prev,
+        [appointmentId]: {
+          ...prev[appointmentId],
+          isActive: false,
+          isPlaying: false,
+          showModal: false
+        }
+      }));
+
+      setStreamStatus(prev => ({
+        ...prev,
+        [appointmentId]: 'inactive'
+      }));
+
+      setIsStreaming(false);
+      setActiveStreamModal(null);
+      
+      addDebugLog(`✅ Video stream stopped successfully`);
+    } catch (error) {
+      console.error('Error stopping video stream:', error);
+      addDebugLog(`❌ Error stopping stream`, error);
+    }
+  };
+
+  const toggleVideoStream = async (appointmentId) => {
+    const currentStream = liveVideoStreams[appointmentId];
+    
+    try {
+      if (currentStream?.isPlaying) {
+        // Pause stream
+        await apiCall(`http://localhost:8080/api/video/pause/${appointmentId}`, {
+          method: 'POST'
+        });
+        setLiveVideoStreams(prev => ({
+          ...prev,
+          [appointmentId]: {
+            ...prev[appointmentId],
+            isPlaying: false
+          }
+        }));
+        setStreamStatus(prev => ({
+          ...prev,
+          [appointmentId]: 'paused'
+        }));
+        addDebugLog(`⏸️ Stream paused`);
+      } else {
+        // Resume stream
+        await apiCall(`http://localhost:8080/api/video/resume/${appointmentId}`, {
+          method: 'POST'
+        });
+        setLiveVideoStreams(prev => ({
+          ...prev,
+          [appointmentId]: {
+            ...prev[appointmentId],
+            isPlaying: true
+          }
+        }));
+        setStreamStatus(prev => ({
+          ...prev,
+          [appointmentId]: 'active'
+        }));
+        addDebugLog(`▶️ Stream resumed`);
+      }
+    } catch (error) {
+      console.error('Error toggling video stream:', error);
+      addDebugLog(`❌ Error toggling stream`, error);
+    }
+  };
+
+  const checkStreamStatus = async (appointmentId) => {
+    const { data, error } = await apiCall(`http://localhost:8080/api/video/stream/${appointmentId}`);
+    
+    if (!error && data?.success && data.stream) {
+      const stream = data.stream;
+      setStreamStatus(prev => ({
+        ...prev,
+        [appointmentId]: stream.status
+      }));
+
+      if (stream.status === 'active' || stream.status === 'paused') {
+        setLiveVideoStreams(prev => ({
+          ...prev,
+          [appointmentId]: {
+            isActive: true,
+            isPlaying: stream.status === 'active',
+            streamId: stream.streamId,
+            timestamp: new Date(stream.startedAt).toLocaleTimeString()
+          }
+        }));
+      }
+      addDebugLog(`📊 Stream status: ${stream.status}`);
+    } else {
+      setStreamStatus(prev => ({
+        ...prev,
+        [appointmentId]: 'inactive'
+      }));
+      addDebugLog(`📊 No active stream found`);
+    }
+  };
+
+  // Check if billing already exists for an appointment
+  const checkBillingExists = async (appointmentId) => {
+    const { data, error } = await apiCall(`http://localhost:8080/api/billing/appointment/${appointmentId}`);
+    return !error && data && data.length > 0;
+  };
+
+  // Optimized Payment and appointment functions
+  const syncPaymentStatuses = async (appointmentsData) => {
+    if (syncInProgress) return;
+    
+    try {
+      setSyncInProgress(true);
+      addDebugLog("Starting payment status synchronization...");
+      
+      const paymentStatusMap = {};
+      const paidAppointmentIds = new Set();
+
+      // Try bulk paid endpoint first
+      const { data: paidBillsData, error: paidError } = await apiCall('http://localhost:8080/api/billing/paid');
+      
+      if (!paidError && paidBillsData) {
+        const paidBills = Array.isArray(paidBillsData) ? paidBillsData : [];
+        addDebugLog("Paid bills from API:", paidBills);
+
+        paidBills.forEach(bill => {
+          if (bill.appointmentId) {
+            paidAppointmentIds.add(bill.appointmentId);
+          }
+        });
+      }
+
+      // Check each appointment
+      for (const appointment of appointmentsData) {
+        try {
+          let paymentStatus = 'no-billing';
+
+          if (paidAppointmentIds.has(appointment.id)) {
+            paymentStatus = 'paid';
+          } else {
+            const { data: billingData } = await apiCall(`http://localhost:8080/api/billing/appointment/${appointment.id}`);
+            const appointmentBillings = Array.isArray(billingData) ? billingData : [];
+            
+            if (appointmentBillings.length > 0) {
+              paymentStatus = appointmentBillings[0].paymentStatus || 'pending';
+            }
+          }
+
+          paymentStatusMap[appointment.id] = paymentStatus;
+
+        } catch (error) {
+          console.warn(`Error checking payment for appointment ${appointment.id}:`, error.message);
+          paymentStatusMap[appointment.id] = 'no-billing';
+        }
+      }
+
+      addDebugLog("Final payment status mapping:", paymentStatusMap);
+      setPaymentStatuses(paymentStatusMap);
+      setPaymentHistory(Array.from(paidAppointmentIds).map(id => ({ appointmentId: id })));
+
+    } catch (error) {
+      console.error("Error in payment sync:", error);
+      addDebugLog("Error in payment sync:", error);
+      // Set default statuses on error
+      const paymentStatusMap = {};
+      appointmentsData.forEach(appointment => {
+        paymentStatusMap[appointment.id] = 'pending';
+      });
+      setPaymentStatuses(paymentStatusMap);
+    } finally {
+      setSyncInProgress(false);
+    }
+  };
+
   const fetchAppointments = async () => {
     try {
       setLoading(true);
@@ -28,136 +562,125 @@ export default function CustomerBooking() {
         return;
       }
 
-      const res = await axios.get(
+      addDebugLog("Fetching appointments for:", ownername);
+      const { data, error: fetchError } = await apiCall(
         `http://localhost:8080/appointment/owner/${ownername}`
       );
 
-      let appointmentsData = [];
-      if (Array.isArray(res.data)) {
-        appointmentsData = res.data;
-      } else {
-        appointmentsData = res.data ? [res.data] : [];
+      if (fetchError) {
+        throw new Error("Unable to load booking data from backend.");
       }
 
+      let appointmentsData = Array.isArray(data) ? data : (data ? [data] : []);
+      addDebugLog("Appointments data received:", appointmentsData);
       setAppointments(appointmentsData);
       
-      // Fetch payment status for each appointment
-      await fetchPaymentStatuses(appointmentsData);
-      // Fetch payment history
-      await fetchPaymentHistory();
+      await syncPaymentStatuses(appointmentsData);
+      
+      // Check stream status only for in-progress appointments
+      const inProgressAppointments = appointmentsData.filter(apt => apt.status === 'in-progress');
+      for (const appointment of inProgressAppointments) {
+        await checkStreamStatus(appointment.id);
+      }
+      
     } catch (err) {
       console.error("API Error:", err);
-      setError("Unable to load booking data from backend.");
+      setError(err.message || "Unable to load booking data from backend.");
       setAppointments([]);
     } finally {
       setLoading(false);
     }
   };
 
-  // Fetch payment status for each appointment
-  const fetchPaymentStatuses = async (appointmentsData) => {
-    const paymentStatusPromises = appointmentsData.map(async (appointment) => {
-      try {
-        const billingRes = await axios.get(
-          `http://localhost:8080/api/billing/appointment/${appointment.id}`
-        );
+  const refreshAppointmentPaymentStatus = async (appointmentId) => {
+    try {
+      let finalStatus = 'no-billing';
+      
+      // Check paid endpoint first
+      const { data: paidBillsData } = await apiCall('http://localhost:8080/api/billing/paid');
+      const paidBills = Array.isArray(paidBillsData) ? paidBillsData : [];
+      const isPaid = paidBills.some(bill => bill.appointmentId === appointmentId);
+      
+      if (isPaid) {
+        finalStatus = 'paid';
+      } else {
+        // Check individual billing
+        const { data: billingData } = await apiCall(`http://localhost:8080/api/billing/appointment/${appointmentId}`);
+        const appointmentBillings = Array.isArray(billingData) ? billingData : [];
         
-        console.log(`Billing response for appointment ${appointment.id}:`, billingRes.data);
-        
-        if (billingRes.data && billingRes.data.length > 0) {
-          const billing = billingRes.data[0];
-          return {
-            appointmentId: appointment.id,
-            paymentStatus: billing.paymentStatus || 'pending'
-          };
+        if (appointmentBillings.length > 0) {
+          finalStatus = appointmentBillings[0].paymentStatus || 'pending';
         }
-        
-        return {
-          appointmentId: appointment.id,
-          paymentStatus: 'pending'
-        };
-      } catch (error) {
-        console.error(`Error fetching payment status for appointment ${appointment.id}:`, error);
-        return {
-          appointmentId: appointment.id,
-          paymentStatus: 'pending'
-        };
       }
-    });
 
-    try {
-      const paymentStatusResults = await Promise.all(paymentStatusPromises);
-      const paymentStatusMap = {};
-      
-      paymentStatusResults.forEach(result => {
-        paymentStatusMap[result.appointmentId] = result.paymentStatus;
-      });
-      
-      console.log("Final payment statuses:", paymentStatusMap);
-      setPaymentStatuses(paymentStatusMap);
-    } catch (error) {
-      console.error("Error fetching payment statuses:", error);
-    }
-  };
-
-  // Fetch payment history
-  const fetchPaymentHistory = async () => {
-    try {
-      // Try to fetch from backend endpoint first
-      const response = await axios.get(
-        `http://localhost:8080/api/billing/provider/${ownername}`
-      );
-      
-      if (response.data && Array.isArray(response.data)) {
-        const paidBills = response.data.filter(bill => bill.paymentStatus === 'paid');
-        console.log("Fetched paid bills:", paidBills);
-        setPaymentHistory(paidBills);
-      }
-    } catch (error) {
-      console.error("Error fetching payment history from endpoint, using fallback:", error);
-      // Fallback: get paid appointments from current data
-      const paidAppointments = appointments.filter(apt => 
-        paymentStatuses[apt.id] === 'paid'
-      );
-      const paidBills = paidAppointments.map(apt => ({
-        id: apt.id,
-        vehicleName: apt.vehicleName,
-        vehicleNumber: apt.vehicleNumber,
-        totalAmount: calculateServiceAmount(apt.serviceType),
-        paymentDate: new Date().toISOString(),
-        serviceType: apt.serviceType,
-        paymentStatus: 'paid'
+      setPaymentStatuses(prev => ({
+        ...prev,
+        [appointmentId]: finalStatus
       }));
-      console.log("Fallback paid bills:", paidBills);
-      setPaymentHistory(paidBills);
+
+      return finalStatus;
+      
+    } catch (error) {
+      console.error(`Error in payment refresh:`, error);
+      return 'error';
     }
   };
 
   useEffect(() => {
     const storedOwnername = localStorage.getItem("providerOwnername");
-    if (storedOwnername) setOwnername(storedOwnername);
+    if (storedOwnername) {
+      setOwnername(storedOwnername);
+      addDebugLog("Provider name set from localStorage:", storedOwnername);
+    }
   }, []);
 
   useEffect(() => {
-    if (ownername) fetchAppointments();
-  }, [ownername]);
+    if (ownername) {
+      addDebugLog("Initial data fetch for:", ownername);
+      fetchAppointments();
+      
+      const interval = setInterval(() => {
+        if (appointments.length > 0 && !syncInProgress) {
+          addDebugLog("Periodic payment sync running...");
+          syncPaymentStatuses(appointments);
+        }
+      }, 30000);
+      
+      return () => {
+        clearInterval(interval);
+        if (syncTimeoutRef.current) {
+          clearTimeout(syncTimeoutRef.current);
+        }
+        // Clean up media streams and WebRTC
+        if (userMediaStream) {
+          userMediaStream.getTracks().forEach(track => track.stop());
+        }
+        // Clean up WebRTC intervals
+        Object.values(webRTCIntervalsRef.current).forEach(interval => clearInterval(interval));
+        // Clean up peer connections
+        Object.values(peerConnectionsRef.current).forEach(pc => pc.close());
+      };
+    }
+  }, [ownername, appointments.length]);
 
-  // Update appointment status
+  // Prevent duplicate billing creation
   const updateAppointmentStatus = async (appointmentId, newStatus) => {
     try {
       setUpdatingStatus(prev => ({ ...prev, [appointmentId]: true }));
       
-      const response = await axios.patch(
+      addDebugLog(`Updating appointment ${appointmentId} to status: ${newStatus}`);
+      const { data, error: updateError } = await apiCall(
         `http://localhost:8080/appointment/${appointmentId}/status`,
-        { status: newStatus },
         {
+          method: 'PATCH',
+          data: { status: newStatus },
           headers: {
             'Content-Type': 'application/json'
           }
         }
       );
 
-      if (response.status === 200) {
+      if (!updateError) {
         setAppointments(prev => 
           prev.map(apt => 
             apt.id === appointmentId 
@@ -167,13 +690,33 @@ export default function CustomerBooking() {
         );
         
         if (newStatus === "in-progress") {
-          startVideoStream(appointmentId);
+          // Auto-start video stream when service starts
+          setTimeout(() => {
+            startVideoStream(appointmentId);
+          }, 2000);
         }
         
-        // Create billing record when status is set to completed
         if (newStatus === "completed") {
-          await createBillingRecord(appointmentId);
+          // Auto-stop video stream when service completes
+          setTimeout(() => {
+            stopVideoStream(appointmentId);
+          }, 1000);
+          
+          // Only create billing if status is completed AND no billing exists
+          const billingExists = await checkBillingExists(appointmentId);
+          if (!billingExists) {
+            await createBillingRecord(appointmentId);
+          } else {
+            addDebugLog(`Billing already exists for appointment ${appointmentId}, skipping auto-creation`);
+          }
         }
+
+        // Refresh payment status after update
+        syncTimeoutRef.current = setTimeout(() => {
+          refreshAppointmentPaymentStatus(appointmentId);
+        }, 2000);
+      } else {
+        throw new Error("Failed to update status");
       }
     } catch (err) {
       console.error("Error updating status:", err);
@@ -183,11 +726,121 @@ export default function CustomerBooking() {
     }
   };
 
-  // Create billing records
+  const openBillingModal = (appointment) => {
+    setSelectedAppointment(appointment);
+    setBillingServices([]);
+    setShowBillingModal(true);
+  };
+
+  const closeBillingModal = () => {
+    setShowBillingModal(false);
+    setSelectedAppointment(null);
+    setBillingServices([]);
+  };
+
+  const addServiceToBilling = (service) => {
+    setBillingServices(prev => [...prev, {
+      ...service,
+      quantity: 1,
+      total: service.price
+    }]);
+  };
+
+  const removeServiceFromBilling = (serviceId) => {
+    setBillingServices(prev => prev.filter(service => service.id !== serviceId));
+  };
+
+  const updateServiceQuantity = (serviceId, newQuantity) => {
+    if (newQuantity < 1) return;
+    
+    setBillingServices(prev => prev.map(service => 
+      service.id === serviceId 
+        ? { 
+            ...service, 
+            quantity: newQuantity, 
+            total: service.price * newQuantity 
+          }
+        : service
+    ));
+  };
+
+  const calculateTotalAmount = () => {
+    const servicesTotal = billingServices.reduce((total, service) => total + service.total, 0);
+    const serviceCharge = 500;
+    return servicesTotal + serviceCharge;
+  };
+
+  const createManualBilling = async () => {
+    if (!selectedAppointment || billingServices.length === 0) {
+      alert("Please add at least one service to create billing.");
+      return;
+    }
+
+    try {
+      const billingExists = await checkBillingExists(selectedAppointment.id);
+      if (billingExists) {
+        alert("Billing already exists for this appointment. Please check the billing records.");
+        closeBillingModal();
+        return;
+      }
+
+      const totalAmount = calculateTotalAmount();
+      
+      const billingData = {
+        appointmentId: selectedAppointment.id,
+        userId: selectedAppointment.userId || 1,
+        vehicleName: selectedAppointment.vehicleName,
+        vehicleNumber: selectedAppointment.vehicleNumber,
+        date: selectedAppointment.date,
+        time: selectedAppointment.time,
+        totalAmount: totalAmount,
+        paymentStatus: 'pending',
+        providerName: ownername,
+        providerId: selectedAppointment.providerId || 1,
+        services: billingServices.map(service => ({
+          serviceName: service.name,
+          providerName: ownername,
+          price: service.price,
+          quantity: service.quantity
+        }))
+      };
+
+      const { error: billingError } = await apiCall(
+        'http://localhost:8080/api/billing/create',
+        {
+          method: 'POST',
+          data: billingData
+        }
+      );
+
+      if (!billingError) {
+        closeBillingModal();
+        refreshAppointmentPaymentStatus(selectedAppointment.id);
+        alert(`Billing created successfully! Total amount: ${formatCurrency(totalAmount)} (Includes ₹500 service charge)`);
+      } else {
+        throw new Error('Failed to create billing');
+      }
+      
+    } catch (error) {
+      console.error('Error creating manual billing:', error);
+      alert('Error creating billing. Please try again.');
+    }
+  };
+
   const createBillingRecord = async (appointmentId) => {
     try {
       const appointment = appointments.find(apt => apt.id === appointmentId);
       if (!appointment) return;
+
+      const billingExists = await checkBillingExists(appointmentId);
+      if (billingExists) {
+        addDebugLog(`Billing already exists for appointment ${appointmentId}, skipping auto-creation`);
+        return;
+      }
+
+      const serviceAmount = calculateServiceAmount(appointment.serviceType);
+      const serviceCharge = 500;
+      const totalAmount = serviceAmount + serviceCharge;
 
       const billingData = {
         appointmentId: appointment.id,
@@ -196,93 +849,78 @@ export default function CustomerBooking() {
         vehicleNumber: appointment.vehicleNumber,
         date: appointment.date,
         time: appointment.time,
-        totalAmount: calculateServiceAmount(appointment.serviceType),
+        totalAmount: totalAmount,
         paymentStatus: 'pending',
-        providerName: ownername
+        providerName: ownername,
+        providerId: appointment.providerId || 1,
+        services: [
+          {
+            serviceName: appointment.serviceType || "General Service",
+            providerName: ownername,
+            price: serviceAmount,
+            quantity: 1
+          }
+        ]
       };
 
-      const response = await axios.post(
+      await apiCall(
         'http://localhost:8080/api/billing/create',
-        billingData
+        {
+          method: 'POST',
+          data: billingData
+        }
       );
 
-      console.log('Billing record created:', response.data);
-      
-      // Refresh payment status after creating billing record
-      refreshPaymentStatus(appointmentId);
+      refreshAppointmentPaymentStatus(appointmentId);
       
     } catch (error) {
-      console.error('Error creating billing record:', error);
+      console.error('Error creating auto-billing record:', error);
     }
   };
 
-  // Helper function to calculate service amount
   const calculateServiceAmount = (serviceType) => {
     const servicePrices = {
-      'oil change': 50.00,
-      'tire rotation': 40.00,
-      'brake service': 120.00,
-      'engine diagnostic': 80.00,
-      'general maintenance': 60.00
+      'oil change': 1500.00,
+      'tire rotation': 1200.00,
+      'brake service': 3500.00,
+      'engine diagnostic': 2500.00,
+      'general maintenance': 1800.00
     };
     
-    return servicePrices[serviceType?.toLowerCase()] || 75.00;
+    return servicePrices[serviceType?.toLowerCase()] || 2000.00;
   };
 
-  const handleBilling = (appointment) => {
-    // Check if payment is already paid
-    if (paymentStatuses[appointment.id] === 'paid') {
+  const handleBilling = async (appointment) => {
+    const currentStatus = await refreshAppointmentPaymentStatus(appointment.id);
+    
+    if (currentStatus === 'paid') {
       alert('This appointment has already been paid.');
       return;
     }
     
-    // Navigate to billing page with appointment details only (no callbacks)
+    if (currentStatus === 'no-billing') {
+      alert('No billing record found. Please complete the service first or create billing manually.');
+      return;
+    }
+    
     navigate(`/billing/${appointment.id}`, { 
       state: { 
-        appointment
+        appointment,
+        appointmentId: appointment.id
       } 
     });
   };
 
-  // Refresh payment status for a specific appointment
-  const refreshPaymentStatus = async (appointmentId) => {
-    try {
-      const billingRes = await axios.get(
-        `http://localhost:8080/api/billing/appointment/${appointmentId}`
-      );
-      
-      if (billingRes.data && billingRes.data.length > 0) {
-        const billing = billingRes.data[0];
-        const newPaymentStatus = billing.paymentStatus || 'pending';
-        
-        setPaymentStatuses(prev => ({
-          ...prev,
-          [appointmentId]: newPaymentStatus
-        }));
-        
-        // If payment status changed to paid, refresh history
-        if (newPaymentStatus === 'paid') {
-          console.log(`Payment status changed to paid for appointment ${appointmentId}, refreshing history`);
-          await fetchPaymentHistory();
-        }
-      }
-    } catch (error) {
-      console.error(`Error refreshing payment status for appointment ${appointmentId}:`, error);
-    }
+  const refreshAllData = async () => {
+    addDebugLog("Manual refresh triggered");
+    await fetchAppointments();
   };
 
-  // Manual refresh for payment status and history
-  const refreshPaymentData = async () => {
-    await fetchPaymentStatuses(appointments);
-    await fetchPaymentHistory();
-  };
-
-  // Format date for display
   const formatDate = (dateString) => {
     if (!dateString) return 'N/A';
     try {
       const date = new Date(dateString);
-      return date.toLocaleDateString('en-US', {
+      return date.toLocaleDateString('en-IN', {
         year: 'numeric',
         month: 'short',
         day: 'numeric'
@@ -292,89 +930,206 @@ export default function CustomerBooking() {
     }
   };
 
-  // Format currency
   const formatCurrency = (amount) => {
-    return new Intl.NumberFormat('en-US', {
+    return new Intl.NumberFormat('en-IN', {
       style: 'currency',
-      currency: 'USD'
+      currency: 'INR',
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
     }).format(amount || 0);
   };
 
-  // Calculate total revenue from payment history
   const calculateTotalRevenue = () => {
     return paymentHistory.reduce((total, payment) => total + (payment.totalAmount || 0), 0);
   };
 
-  // Add this function for testing payment status
-  const updatePaymentStatusTest = async (appointmentId, status) => {
-    try {
-      // First get the billing record
-      const billingRes = await axios.get(
-        `http://localhost:8080/api/billing/appointment/${appointmentId}`
+  // Debug Panel Component
+  const DebugPanel = () => {
+    if (!showDebug) return null;
+
+    return (
+      <div className="fixed bottom-4 right-4 bg-gray-900 text-white p-4 rounded-lg max-w-md max-h-64 overflow-y-auto text-xs z-50">
+        <div className="flex justify-between items-center mb-2">
+          <h4 className="font-bold">Provider Debug Logs</h4>
+          <button 
+            onClick={() => setDebugLogs([])}
+            className="text-xs bg-red-600 px-2 py-1 rounded"
+          >
+            Clear
+          </button>
+        </div>
+        {debugLogs.map((log, index) => (
+          <div key={index} className="border-b border-gray-700 py-1">
+            <div className="text-green-400">[{log.timestamp}] {log.message}</div>
+            {log.data && (
+              <div className="text-gray-400 text-xs truncate">
+                {JSON.stringify(log.data)}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    );
+  };
+
+  // Debug Button Component
+  const DebugButton = () => (
+    <button
+      onClick={() => setShowDebug(!showDebug)}
+      className={`px-3 py-2 rounded-lg flex items-center space-x-2 ${
+        showDebug ? 'bg-red-600 text-white' : 'bg-gray-600 text-white'
+      }`}
+    >
+      <Bug className="w-4 h-4" />
+      <span>Debug {showDebug ? 'ON' : 'OFF'}</span>
+    </button>
+  );
+
+  // Video Stream Modal Component with WebRTC
+  const VideoStreamModal = ({ appointmentId, onClose }) => {
+    const stream = liveVideoStreams[appointmentId];
+    const modalVideoRef = useRef(null);
+
+    useEffect(() => {
+      if (modalVideoRef.current && stream?.userStream) {
+        modalVideoRef.current.srcObject = stream.userStream;
+      }
+    }, [stream]);
+
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4">
+        <div className="bg-white rounded-lg w-full max-w-4xl">
+          <div className="flex justify-between items-center p-4 border-b">
+            <h3 className="text-lg font-semibold">
+              Live Service Stream - Appointment #{appointmentId}
+            </h3>
+            <div className="flex items-center space-x-2">
+              <DebugButton />
+              <button
+                onClick={onClose}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+          </div>
+          <div className="p-4">
+            <div className="bg-black rounded-lg aspect-video flex items-center justify-center relative">
+              {stream?.isPlaying ? (
+                <video
+                  ref={modalVideoRef}
+                  autoPlay
+                  muted
+                  playsInline
+                  className="w-full h-full object-cover rounded-lg"
+                />
+              ) : (
+                <div className="text-center text-white">
+                  <Play className="w-12 h-12 mx-auto mb-2 opacity-50" />
+                  <p>Stream Paused</p>
+                </div>
+              )}
+              
+              <div className="absolute top-4 left-4 flex items-center space-x-2">
+                <div className={`w-3 h-3 rounded-full ${
+                  stream?.isPlaying ? 'bg-green-500 animate-pulse' : 'bg-yellow-500'
+                }`}></div>
+                <span className="text-white text-sm font-medium">
+                  {stream?.isPlaying ? 'LIVE' : 'PAUSED'}
+                </span>
+              </div>
+
+              <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 flex space-x-4">
+                <button
+                  onClick={() => toggleVideoStream(appointmentId)}
+                  className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors flex items-center space-x-2"
+                >
+                  {stream?.isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+                  <span>{stream?.isPlaying ? 'Pause' : 'Play'}</span>
+                </button>
+                <button
+                  onClick={() => stopVideoStream(appointmentId)}
+                  className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 transition-colors"
+                >
+                  Stop Stream
+                </button>
+              </div>
+            </div>
+            
+            <div className="mt-4 grid grid-cols-3 gap-4 text-sm">
+              <div className="text-center p-2 bg-gray-100 rounded">
+                <p className="font-medium">Stream ID</p>
+                <p className="text-gray-600 truncate">{stream?.streamId}</p>
+              </div>
+              <div className="text-center p-2 bg-gray-100 rounded">
+                <p className="font-medium">Started At</p>
+                <p className="text-gray-600">{stream?.timestamp}</p>
+              </div>
+              <div className="text-center p-2 bg-gray-100 rounded">
+                <p className="font-medium">Status</p>
+                <p className="text-gray-600 capitalize">{streamStatus[appointmentId] || 'inactive'}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderVideoControls = (appointment) => {
+    const stream = liveVideoStreams[appointment.id];
+    const status = streamStatus[appointment.id];
+
+    if (stream?.isActive) {
+      return (
+        <div className="flex items-center space-x-2">
+          <div className="flex items-center space-x-1">
+            <button
+              onClick={() => toggleVideoStream(appointment.id)}
+              className="p-1 text-blue-600 hover:text-blue-800 transition-colors"
+            >
+              {stream.isPlaying ? (
+                <Pause className="w-4 h-4" />
+              ) : (
+                <Play className="w-4 h-4" />
+              )}
+            </button>
+            <span className={`text-xs font-medium ${
+              stream.isPlaying ? 'text-green-600' : 'text-yellow-600'
+            }`}>
+              ● {stream.isPlaying ? 'LIVE' : 'PAUSED'}
+            </span>
+          </div>
+          <button
+            onClick={() => stopVideoStream(appointment.id)}
+            className="text-xs text-red-600 hover:text-red-800 transition-colors"
+          >
+            Stop
+          </button>
+          <button
+            onClick={() => setActiveStreamModal(appointment.id)}
+            className="text-xs text-blue-600 hover:text-blue-800 transition-colors"
+          >
+            View
+          </button>
+        </div>
       );
-      
-      if (billingRes.data && billingRes.data.length > 0) {
-        const billing = billingRes.data[0];
-        
-        // Update the payment status
-        const updateRes = await axios.put(
-          `http://localhost:8080/api/billing/${billing.id}/status`,
-          { paymentStatus: status }
-        );
-        
-        console.log('Payment status updated:', updateRes.data);
-        
-        // Refresh the payment status and history
-        await refreshPaymentStatus(appointmentId);
-      }
-    } catch (error) {
-      console.error('Error updating payment status:', error);
+    } else {
+      return (
+        <button
+          onClick={() => startVideoStream(appointment.id)}
+          disabled={appointment.status !== 'in-progress' || paymentStatuses[appointment.id] === 'paid'}
+          className={`flex items-center space-x-1 px-3 py-1 rounded text-xs font-medium transition-colors ${
+            appointment.status === 'in-progress' && paymentStatuses[appointment.id] !== 'paid'
+              ? 'bg-green-100 text-green-700 hover:bg-green-200'
+              : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+          }`}
+        >
+          <Video className="w-3 h-3" />
+          <span>Start Video</span>
+        </button>
+      );
     }
-  };
-
-  // Simulate video stream functionality
-  const startVideoStream = (appointmentId) => {
-    setLiveVideoStreams(prev => ({
-      ...prev,
-      [appointmentId]: {
-        isActive: true,
-        isPlaying: true,
-        url: `https://example.com/live-stream/${appointmentId}`,
-        timestamp: new Date().toLocaleTimeString()
-      }
-    }));
-
-    setTimeout(() => {
-      setLiveVideoStreams(prev => ({
-        ...prev,
-        [appointmentId]: {
-          ...prev[appointmentId],
-          isActive: false,
-          isPlaying: false
-        }
-      }));
-    }, 30 * 60 * 1000);
-  };
-
-  const toggleVideoStream = (appointmentId) => {
-    setLiveVideoStreams(prev => ({
-      ...prev,
-      [appointmentId]: {
-        ...prev[appointmentId],
-        isPlaying: !prev[appointmentId]?.isPlaying
-      }
-    }));
-  };
-
-  const stopVideoStream = (appointmentId) => {
-    setLiveVideoStreams(prev => ({
-      ...prev,
-      [appointmentId]: {
-        ...prev[appointmentId],
-        isActive: false,
-        isPlaying: false
-      }
-    }));
   };
 
   const getStatusBadge = (status) => {
@@ -394,6 +1149,27 @@ export default function CustomerBooking() {
       <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold ${config.color}`}>
         <Icon className="w-3 h-3 mr-1" />
         {status?.replace('-', ' ') || "Pending"}
+      </span>
+    );
+  };
+
+  const getPaymentStatusBadge = (appointmentId) => {
+    const status = paymentStatuses[appointmentId];
+    
+    const statusConfig = {
+      'paid': { color: 'bg-green-100 text-green-800', text: 'Paid', icon: CheckCircle },
+      'pending': { color: 'bg-yellow-100 text-yellow-800', text: 'Pending Payment', icon: Clock },
+      'no-billing': { color: 'bg-gray-100 text-gray-500', text: 'No Billing', icon: AlertCircle },
+      'error': { color: 'bg-red-100 text-red-800', text: 'Error', icon: XCircle }
+    };
+
+    const config = statusConfig[status] || { color: 'bg-gray-100 text-gray-500', text: 'Unknown', icon: AlertCircle };
+    const Icon = config.icon;
+    
+    return (
+      <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold ${config.color}`}>
+        <Icon className="w-3 h-3 mr-1" />
+        {config.text}
       </span>
     );
   };
@@ -428,43 +1204,68 @@ export default function CustomerBooking() {
           <p className="text-gray-600 mt-2">Manage customer appointments and live service streams</p>
         </div>
         <div className="flex space-x-3">
+          <DebugButton />
           <button
             onClick={() => setShowPaymentHistory(!showPaymentHistory)}
             className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center space-x-2"
           >
-            <DollarSign className="w-4 h-4" />
-            <span>{showPaymentHistory ? 'Hide Payments' : 'Show Payments'}</span>
+            <IndianRupee className="w-4 h-4" />
+            <span>{showPaymentHistory ? 'Hide' : 'Show'} Payment History</span>
           </button>
           <button
-            onClick={fetchAppointments}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center space-x-2"
+            onClick={refreshAllData}
+            disabled={syncInProgress}
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-blue-400 transition-colors flex items-center space-x-2"
           >
-            <RefreshCw className="w-4 h-4" />
+            <RefreshCw className={`w-4 h-4 ${syncInProgress ? 'animate-spin' : ''}`} />
             <span>Refresh All</span>
-          </button>
-          <button
-            onClick={refreshPaymentData}
-            className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors flex items-center space-x-2"
-          >
-            <RefreshCw className="w-4 h-4" />
-            <span>Refresh Payments</span>
           </button>
         </div>
       </div>
 
-      {/* Error Message */}
       {error && (
         <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-6">
           {error}
         </div>
       )}
 
-      {/* Payment History Section */}
+      {syncInProgress && (
+        <div className="bg-blue-100 border border-blue-400 text-blue-700 px-4 py-3 rounded mb-6 flex items-center">
+          <RefreshCw className="w-4 h-4 animate-spin mr-2" />
+          Synchronizing payment data...
+        </div>
+      )}
+
+      <div className="mb-4 p-3 bg-blue-50 rounded text-sm">
+        <div className="flex items-center space-x-4">
+          <div className="flex items-center space-x-1">
+            <CheckCircle className="w-4 h-4 text-green-600" />
+            <span className="font-medium">Paid:</span>
+            <span className="font-bold">{Object.values(paymentStatuses).filter(status => status === 'paid').length}</span>
+          </div>
+          <div className="flex items-center space-x-1">
+            <Clock className="w-4 h-4 text-yellow-600" />
+            <span className="font-medium">Pending:</span>
+            <span className="font-bold">{Object.values(paymentStatuses).filter(status => status === 'pending').length}</span>
+          </div>
+          <div className="flex items-center space-x-1">
+            <AlertCircle className="w-4 h-4 text-gray-500" />
+            <span className="font-medium">No Billing:</span>
+            <span className="font-bold">{Object.values(paymentStatuses).filter(status => status === 'no-billing').length}</span>
+          </div>
+          <div className="flex items-center space-x-1">
+            <Video className="w-4 h-4 text-purple-600" />
+            <span className="font-medium">Active Streams:</span>
+            <span className="font-bold">{Object.values(liveVideoStreams).filter(stream => stream.isActive).length}</span>
+          </div>
+        </div>
+      </div>
+
       {showPaymentHistory && (
         <div className="mb-6 bg-white rounded-lg shadow-lg p-6">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-xl font-bold text-gray-800 flex items-center">
-              <DollarSign className="w-5 h-5 mr-2 text-green-600" />
+              <IndianRupee className="w-5 h-5 mr-2 text-green-600" />
               Payment History
             </h2>
             <div className="text-right">
@@ -479,7 +1280,7 @@ export default function CustomerBooking() {
 
           {paymentHistory.length === 0 ? (
             <div className="text-center py-8 text-gray-500">
-              <DollarSign className="w-12 h-12 mx-auto mb-3 text-gray-300" />
+              <IndianRupee className="w-12 h-12 mx-auto mb-3 text-gray-300" />
               <p>No payment history found</p>
               <p className="text-sm">Completed and paid services will appear here</p>
             </div>
@@ -514,10 +1315,17 @@ export default function CustomerBooking() {
                       </div>
                     )}
                     
-                    {payment.serviceType && (
+                    {payment.appointmentId && (
                       <div className="flex justify-between">
-                        <span className="text-gray-600">Service:</span>
-                        <span className="text-gray-700 capitalize">{payment.serviceType}</span>
+                        <span className="text-gray-600">Appointment:</span>
+                        <span className="text-gray-700">#{payment.appointmentId}</span>
+                      </div>
+                    )}
+                    
+                    {payment.paymentMethod && (
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Method:</span>
+                        <span className="text-gray-700 capitalize">{payment.paymentMethod}</span>
                       </div>
                     )}
                     
@@ -538,14 +1346,164 @@ export default function CustomerBooking() {
         </div>
       )}
 
-      {/* Debug info - you can remove this in production */}
-      <div className="mb-4 p-3 bg-gray-100 rounded text-sm">
-        <strong>Debug Info:</strong> 
-        <div>Appointments: {appointments.length}</div>
-        <div>Payment Statuses: {JSON.stringify(paymentStatuses)}</div>
-        <div>Payment History: {paymentHistory.length} records</div>
-        <div>Completed Appointments: {appointments.filter(apt => apt.status === 'completed').length}</div>
-      </div>
+      {showBillingModal && selectedAppointment && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="p-6">
+              <div className="flex justify-between items-center mb-6">
+                <h3 className="text-xl font-bold">Create Billing Invoice</h3>
+                <button
+                  onClick={closeBillingModal}
+                  className="text-gray-500 hover:text-gray-700"
+                >
+                  <X className="w-6 h-6" />
+                </button>
+              </div>
+
+              <div className="mb-6 p-4 bg-gray-50 rounded-lg">
+                <h4 className="font-semibold mb-2">Appointment Details</h4>
+                <div className="grid grid-cols-2 gap-4 text-sm">
+                  <div>
+                    <span className="text-gray-600">Vehicle:</span>
+                    <p className="font-medium">{selectedAppointment.vehicleName} ({selectedAppointment.vehicleNumber})</p>
+                  </div>
+                  <div>
+                    <span className="text-gray-600">Customer:</span>
+                    <p className="font-medium">{selectedAppointment.name}</p>
+                  </div>
+                  <div>
+                    <span className="text-gray-600">Date:</span>
+                    <p className="font-medium">{selectedAppointment.date}</p>
+                  </div>
+                  <div>
+                    <span className="text-gray-600">Time:</span>
+                    <p className="font-medium">{selectedAppointment.time}</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div>
+                  <h4 className="font-semibold mb-4 flex items-center">
+                    <ShoppingCart className="w-5 h-5 mr-2" />
+                    Available Services
+                  </h4>
+                  <div className="space-y-3 max-h-96 overflow-y-auto">
+                    {availableServices.map(service => (
+                      <div key={service.id} className="p-3 border border-gray-200 rounded-lg hover:border-blue-300 transition-colors">
+                        <div className="flex justify-between items-center">
+                          <div>
+                            <p className="font-medium">{service.name}</p>
+                            <p className="text-sm text-gray-500">{service.category}</p>
+                          </div>
+                          <div className="flex items-center space-x-3">
+                            <span className="font-bold text-green-600">{formatCurrency(service.price)}</span>
+                            <button
+                              onClick={() => addServiceToBilling(service)}
+                              className="p-1 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
+                            >
+                              <Plus className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <h4 className="font-semibold mb-4 flex items-center">
+                    <FileText className="w-5 h-5 mr-2" />
+                    Selected Services ({billingServices.length})
+                  </h4>
+                  
+                  {billingServices.length === 0 ? (
+                    <div className="text-center py-8 text-gray-500 border-2 border-dashed border-gray-300 rounded-lg">
+                      <ShoppingCart className="w-12 h-12 mx-auto mb-3 text-gray-300" />
+                      <p>No services selected</p>
+                      <p className="text-sm">Add services from the left panel</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-3 max-h-96 overflow-y-auto">
+                      {billingServices.map(service => (
+                        <div key={service.id} className="p-3 border border-gray-200 rounded-lg bg-white">
+                          <div className="flex justify-between items-start mb-2">
+                            <div>
+                              <p className="font-medium">{service.name}</p>
+                              <p className="text-sm text-gray-500">{service.category}</p>
+                            </div>
+                            <button
+                              onClick={() => removeServiceFromBilling(service.id)}
+                              className="p-1 bg-red-600 text-white rounded hover:bg-red-700 transition-colors"
+                            >
+                              <Minus className="w-4 h-4" />
+                            </button>
+                          </div>
+                          <div className="flex justify-between items-center">
+                            <div className="flex items-center space-x-2">
+                              <button
+                                onClick={() => updateServiceQuantity(service.id, service.quantity - 1)}
+                                className="p-1 bg-gray-200 rounded hover:bg-gray-300 transition-colors"
+                                disabled={service.quantity <= 1}
+                              >
+                                <Minus className="w-3 h-3" />
+                              </button>
+                              <span className="font-medium w-8 text-center">{service.quantity}</span>
+                              <button
+                                onClick={() => updateServiceQuantity(service.id, service.quantity + 1)}
+                                className="p-1 bg-gray-200 rounded hover:bg-gray-300 transition-colors"
+                              >
+                                <Plus className="w-3 h-3" />
+                              </button>
+                            </div>
+                            <span className="font-bold text-green-600">
+                              {formatCurrency(service.total)}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                      
+                      <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                        <div className="space-y-2 text-sm">
+                          <div className="flex justify-between">
+                            <span>Services Total:</span>
+                            <span>{formatCurrency(billingServices.reduce((total, service) => total + service.total, 0))}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span>Service Charge:</span>
+                            <span>₹500.00</span>
+                          </div>
+                          <div className="flex justify-between items-center font-bold text-lg pt-2 border-t border-blue-200">
+                            <span>Total Amount:</span>
+                            <span className="text-green-700">{formatCurrency(calculateTotalAmount())}</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex justify-end space-x-3 mt-6 pt-4 border-t">
+                <button
+                  onClick={closeBillingModal}
+                  className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={createManualBilling}
+                  disabled={billingServices.length === 0}
+                  className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors flex items-center space-x-2"
+                >
+                  <FileText className="w-4 h-4" />
+                  <span>Create Billing Invoice</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {appointments.length === 0 ? (
         <div className="text-center py-12 bg-white rounded-lg shadow-sm">
@@ -583,19 +1541,18 @@ export default function CustomerBooking() {
               <tbody className="bg-white divide-y divide-gray-200">
                 {appointments.map((appointment) => {
                   const isPaid = paymentStatuses[appointment.id] === 'paid';
-                  const showBillingButton = appointment.status === 'completed';
+                  const hasBilling = paymentStatuses[appointment.id] !== 'no-billing';
+                  const showBillingButton = appointment.status === 'completed' && hasBilling && !isPaid;
                   
                   return (
                     <tr
                       key={appointment.id}
                       className="hover:bg-gray-50 transition-colors duration-200"
                     >
-                      {/* ID */}
                       <td className="px-6 py-4 text-sm font-mono text-gray-900">
                         #{appointment.id}
                       </td>
 
-                      {/* Customer Info */}
                       <td className="px-6 py-4">
                         <div className="text-sm font-medium text-gray-900">{appointment.name}</div>
                         <div className="text-sm text-gray-500">{appointment.phone}</div>
@@ -606,52 +1563,33 @@ export default function CustomerBooking() {
                         )}
                       </td>
 
-                      {/* Vehicle Info */}
                       <td className="px-6 py-4">
                         <div className="text-sm font-medium text-gray-900">{appointment.vehicleName}</div>
                         <div className="text-sm text-gray-500">{appointment.vehicleNumber}</div>
                       </td>
 
-                      {/* Service Type */}
                       <td className="px-6 py-4 text-sm text-gray-900">
                         {appointment.serviceType}
                       </td>
 
-                      {/* Date & Time */}
                       <td className="px-6 py-4 text-sm text-gray-900">
                         <div className="font-medium">{appointment.date}</div>
                         <div className="text-gray-500">{appointment.time}</div>
                       </td>
 
-                      {/* Current Status */}
                       <td className="px-6 py-4">
                         {getStatusBadge(appointment.status)}
                       </td>
 
-                      {/* Payment Status */}
                       <td className="px-6 py-4">
-                        <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold ${
-                          paymentStatuses[appointment.id] === 'paid' 
-                            ? 'bg-green-100 text-green-800' 
-                            : appointment.status === 'completed'
-                            ? 'bg-yellow-100 text-yellow-800'
-                            : 'bg-gray-100 text-gray-500'
-                        }`}>
-                          {paymentStatuses[appointment.id] === 'paid' 
-                            ? 'Paid' 
-                            : appointment.status === 'completed'
-                            ? 'Pending Payment'
-                            : 'N/A'
-                          }
-                        </span>
+                        {getPaymentStatusBadge(appointment.id)}
                       </td>
 
-                      {/* Update Status */}
                       <td className="px-6 py-4">
                         <select
                           value=""
                           onChange={(e) => updateAppointmentStatus(appointment.id, e.target.value)}
-                          disabled={updatingStatus[appointment.id]}
+                          disabled={updatingStatus[appointment.id] || isPaid}
                           className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm disabled:bg-gray-100 disabled:cursor-not-allowed"
                         >
                           <option value="">Update Status</option>
@@ -668,57 +1606,18 @@ export default function CustomerBooking() {
                         )}
                       </td>
 
-                      {/* Live Video */}
                       <td className="px-6 py-4">
-                        {liveVideoStreams[appointment.id]?.isActive ? (
-                          <div className="flex items-center space-x-2">
-                            <div className="flex items-center space-x-1">
-                              <button
-                                onClick={() => toggleVideoStream(appointment.id)}
-                                className="p-1 text-blue-600 hover:text-blue-800 transition-colors"
-                              >
-                                {liveVideoStreams[appointment.id].isPlaying ? (
-                                  <Pause className="w-4 h-4" />
-                                ) : (
-                                  <Play className="w-4 h-4" />
-                                )}
-                              </button>
-                              <span className="text-xs text-green-600 font-medium">
-                                ● LIVE
-                              </span>
-                            </div>
-                            <button
-                              onClick={() => stopVideoStream(appointment.id)}
-                              className="text-xs text-red-600 hover:text-red-800 transition-colors"
-                            >
-                              Stop
-                            </button>
-                          </div>
-                        ) : (
-                          <button
-                            onClick={() => startVideoStream(appointment.id)}
-                            disabled={appointment.status !== 'in-progress'}
-                            className={`flex items-center space-x-1 px-3 py-1 rounded text-xs font-medium transition-colors ${
-                              appointment.status === 'in-progress'
-                                ? 'bg-green-100 text-green-700 hover:bg-green-200'
-                                : 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                            }`}
-                          >
-                            <Video className="w-3 h-3" />
-                            <span>Start Video</span>
-                          </button>
-                        )}
+                        {renderVideoControls(appointment)}
                       </td>
 
-                      {/* Actions */}
                       <td className="px-6 py-4 text-sm">
                         <div className="flex flex-col space-y-2">
                           <div className="flex space-x-2">
                             <button
                               onClick={() => updateAppointmentStatus(appointment.id, 'in-progress')}
-                              disabled={appointment.status === 'in-progress' || updatingStatus[appointment.id]}
+                              disabled={appointment.status === 'in-progress' || updatingStatus[appointment.id] || isPaid}
                               className={`px-3 py-1 text-xs rounded transition-colors ${
-                                appointment.status === 'in-progress'
+                                appointment.status === 'in-progress' || isPaid
                                   ? 'bg-blue-100 text-blue-700 cursor-not-allowed'
                                   : 'bg-blue-600 text-white hover:bg-blue-700'
                               }`}
@@ -727,9 +1626,9 @@ export default function CustomerBooking() {
                             </button>
                             <button
                               onClick={() => updateAppointmentStatus(appointment.id, 'completed')}
-                              disabled={appointment.status === 'completed' || updatingStatus[appointment.id]}
+                              disabled={appointment.status === 'completed' || updatingStatus[appointment.id] || isPaid}
                               className={`px-3 py-1 text-xs rounded transition-colors ${
-                                appointment.status === 'completed'
+                                appointment.status === 'completed' || isPaid
                                   ? 'bg-green-100 text-green-700 cursor-not-allowed'
                                   : 'bg-green-600 text-white hover:bg-green-700'
                               }`}
@@ -738,37 +1637,30 @@ export default function CustomerBooking() {
                             </button>
                           </div>
                           
-                          {/* Billing Button - Only show for completed appointments and disable when paid */}
                           {showBillingButton && (
                             <button
                               onClick={() => handleBilling(appointment)}
-                              disabled={isPaid}
-                              className={`flex items-center space-x-1 px-3 py-1 text-xs rounded transition-colors ${
-                                isPaid
-                                  ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                                  : 'bg-purple-600 text-white hover:bg-purple-700'
-                              }`}
+                              className="flex items-center space-x-1 px-3 py-1 text-xs rounded bg-purple-600 text-white hover:bg-purple-700 transition-colors"
                             >
                               <CreditCard className="w-3 h-3" />
-                              <span>{isPaid ? 'Paid' : 'Billing'}</span>
+                              <span>Billing</span>
                             </button>
                           )}
 
-                          {/* Test buttons - remove in production */}
-                          {process.env.NODE_ENV === 'development' && showBillingButton && (
-                            <div className="flex space-x-1 text-xs">
-                              <button
-                                onClick={() => updatePaymentStatusTest(appointment.id, 'pending')}
-                                className="px-2 py-1 bg-yellow-500 text-white rounded"
-                              >
-                                Set Pending
-                              </button>
-                              <button
-                                onClick={() => updatePaymentStatusTest(appointment.id, 'paid')}
-                                className="px-2 py-1 bg-green-500 text-white rounded"
-                              >
-                                Set Paid
-                              </button>
+                          {appointment.status === 'completed' && !hasBilling && (
+                            <button
+                              onClick={() => openBillingModal(appointment)}
+                              className="flex items-center space-x-1 px-3 py-1 text-xs rounded bg-orange-600 text-white hover:bg-orange-700 transition-colors"
+                            >
+                              <FileText className="w-3 h-3" />
+                              <span>Create Billing</span>
+                            </button>
+                          )}
+
+                          {isPaid && (
+                            <div className="flex items-center space-x-1 px-3 py-1 text-xs rounded bg-gray-300 text-gray-500 cursor-not-allowed">
+                              <CheckCircle className="w-3 h-3" />
+                              <span>Already Paid</span>
                             </div>
                           )}
                         </div>
@@ -783,66 +1675,25 @@ export default function CustomerBooking() {
       )}
 
       {/* Video Stream Modal */}
-      {Object.entries(liveVideoStreams).map(([appointmentId, stream]) => 
-        stream.isActive && (
-          <div key={appointmentId} className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-lg w-full max-w-4xl">
-              <div className="flex justify-between items-center p-4 border-b">
-                <h3 className="text-lg font-semibold">
-                  Live Service Stream - Appointment #{appointmentId}
-                </h3>
-                <button
-                  onClick={() => stopVideoStream(appointmentId)}
-                  className="text-gray-500 hover:text-gray-700"
-                >
-                  ✕
-                </button>
-              </div>
-              <div className="p-4">
-                <div className="bg-black rounded-lg aspect-video flex items-center justify-center">
-                  {stream.isPlaying ? (
-                    <div className="text-center text-white">
-                      <div className="animate-pulse bg-red-500 rounded-full w-4 h-4 mx-auto mb-2"></div>
-                      <p>Live Service Feed - {stream.timestamp}</p>
-                      <p className="text-sm text-gray-400 mt-2">Customer can view this stream</p>
-                    </div>
-                  ) : (
-                    <div className="text-center text-white">
-                      <Play className="w-12 h-12 mx-auto mb-2 opacity-50" />
-                      <p>Stream Paused</p>
-                    </div>
-                  )}
-                </div>
-                <div className="flex justify-center space-x-4 mt-4">
-                  <button
-                    onClick={() => toggleVideoStream(appointmentId)}
-                    className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors flex items-center space-x-2"
-                  >
-                    {stream.isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
-                    <span>{stream.isPlaying ? 'Pause' : 'Play'}</span>
-                  </button>
-                  <button
-                    onClick={() => stopVideoStream(appointmentId)}
-                    className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 transition-colors"
-                  >
-                    Stop Stream
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )
+      {activeStreamModal && (
+        <VideoStreamModal 
+          appointmentId={activeStreamModal}
+          onClose={() => setActiveStreamModal(null)}
+        />
       )}
 
-      {/* Summary */}
       <div className="mt-6 flex justify-between items-center">
         <div className="text-sm text-gray-600">
           Showing {appointments.length} booking(s) for {ownername}
         </div>
         <div className="text-sm text-gray-500">
-          Live streams available for "In Progress" services
+          Paid Services: {Object.values(paymentStatuses).filter(status => status === 'paid').length} | 
+          Active Streams: {Object.values(liveVideoStreams).filter(stream => stream.isActive).length}
         </div>
       </div>
+
+      {/* Debug Panel */}
+      <DebugPanel />
     </div>
   );
 }

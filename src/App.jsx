@@ -66,6 +66,8 @@ export default function App() {
           <Route path="/search" element={<SearchResults/>} />
           <Route path="/billing/:id" element={<BillingPage />} />
           <Route path='/payment-methods'element={<Payment />} />
+        
+          <Route path="/provider-dashboard" element={<ProviderDashboard />} />      
         </Routes>
         <Chat />
       </main>

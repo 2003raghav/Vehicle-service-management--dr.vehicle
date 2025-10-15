@@ -8,7 +8,7 @@ export default function Payment() {
   const [error, setError] = useState(null);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [selectedBill, setSelectedBill] = useState(null);
-  const [paymentStep, setPaymentStep] = useState('select'); // 'select', 'confirm', 'processing', 'success'
+  const [paymentStep, setPaymentStep] = useState('select');
   const userId = localStorage.getItem("userId");
   const username = localStorage.getItem("username");
 
@@ -19,39 +19,37 @@ export default function Payment() {
       return;
     }
 
-    const fetchBilling = async () => {
-      try {
-        setLoading(true);
-        console.log("Fetching billing for user ID:", userId);
-        
-        const res = await axios.get(`http://localhost:8080/api/billing/users/${userId}`);
-        console.log("Billing API Response:", res.data);
-        
-        // Fix circular references by cleaning the data
-        const cleanedData = cleanBillingData(res.data);
-        console.log("Cleaned billing data:", cleanedData);
-        
-        if (cleanedData && Array.isArray(cleanedData)) {
-          setBillingData(cleanedData);
-        } else {
-          console.warn("Unexpected response format after cleaning:", cleanedData);
-          setBillingData([]);
-        }
-        
-        setError(null);
-      } catch (err) {
-        console.error("Error fetching billing data:", err);
-        setError("Failed to load billing data. Please try again later.");
-        setBillingData([]);
-      } finally {
-        setLoading(false);
-      }
-    };
-
     fetchBilling();
   }, [userId]);
 
-  // Function to clean circular references from billing data
+  const fetchBilling = async () => {
+    try {
+      setLoading(true);
+      console.log("Fetching billing for user ID:", userId);
+      
+      const res = await axios.get(`http://localhost:8080/api/billing/users/${userId}`);
+      console.log("Billing API Response:", res.data);
+      
+      const cleanedData = cleanBillingData(res.data);
+      console.log("Cleaned billing data:", cleanedData);
+      
+      if (cleanedData && Array.isArray(cleanedData)) {
+        setBillingData(cleanedData);
+      } else {
+        console.warn("Unexpected response format after cleaning:", cleanedData);
+        setBillingData([]);
+      }
+      
+      setError(null);
+    } catch (err) {
+      console.error("Error fetching billing data:", err);
+      setError("Failed to load billing data. Please try again later.");
+      setBillingData([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const cleanBillingData = (data) => {
     if (!data) return data;
     
@@ -65,20 +63,16 @@ export default function Payment() {
   const cleanBillingItem = (billingItem) => {
     if (!billingItem || typeof billingItem !== 'object') return billingItem;
     
-    // Create a clean copy without circular references
     const cleanItem = { ...billingItem };
     
-    // Clean services array
     if (cleanItem.services && Array.isArray(cleanItem.services)) {
       cleanItem.services = cleanItem.services.map(service => {
         const cleanService = { ...service };
-        // Remove the nested billing object from service
         delete cleanService.billing;
         return cleanService;
       });
     }
     
-    // Remove any other potential circular references
     delete cleanItem.billing;
     
     return cleanItem;
@@ -98,7 +92,6 @@ export default function Payment() {
 
   const confirmPayment = (paymentMethod) => {
     setPaymentStep('confirm');
-    // Store the selected payment method temporarily
     setSelectedBill(prev => ({ ...prev, selectedPaymentMethod: paymentMethod }));
   };
 
@@ -107,41 +100,49 @@ export default function Payment() {
     setSelectedBill(prev => ({ ...prev, selectedPaymentMethod: null }));
   };
 
- const processDummyPayment = async () => {
-  if (!selectedBill || !selectedBill.selectedPaymentMethod) return;
+  const processDummyPayment = async () => {
+    if (!selectedBill || !selectedBill.selectedPaymentMethod) return;
 
-  try {
-    setPaymentStep('processing');
-    
-    // Simulate API call delay
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    
-    // Update payment status in backend
-    const response = await axios.put(`http://localhost:8080/api/billing/${selectedBill.id}/pay`, {
-      paymentStatus: "paid",
-      paymentMethod: selectedBill.selectedPaymentMethod
-      // Remove paymentDate as it will be set automatically by backend
-    });
-
-    console.log("Payment response:", response.data);
-    
-    if (response.data) {
-      setPaymentStep('success');
+    try {
+      setPaymentStep('processing');
       
-      // Wait a moment to show success message, then close and refresh
-      setTimeout(() => {
-        closePaymentModal();
-        // Refresh billing data
-        refreshBillingData();
-      }, 1500);
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
+      console.log("Updating payment for billing ID:", selectedBill.id);
+      console.log("Payment method:", selectedBill.selectedPaymentMethod);
+      
+      const response = await axios.put(`http://localhost:8080/api/billing/${selectedBill.id}/pay`, {
+        paymentStatus: "paid",
+        paymentMethod: selectedBill.selectedPaymentMethod,
+        paymentDate: new Date().toISOString()
+      });
+
+      console.log("Payment response:", response.data);
+      
+      if (response.data) {
+        setPaymentStep('success');
+        
+        setTimeout(() => {
+          closePaymentModal();
+          refreshBillingData();
+        }, 1500);
+      }
+    } catch (error) {
+      console.error("Payment failed:", error);
+      console.error("Error details:", error.response?.data);
+      
+      let errorMessage = "❌ Payment failed. Please try again.";
+      if (error.response?.status === 404) {
+        errorMessage = "❌ Billing record not found. Please contact support.";
+      } else if (error.response?.status === 500) {
+        errorMessage = "❌ Server error. Please try again later.";
+      }
+      
+      alert(errorMessage);
+      setPaymentStep('select');
     }
-  } catch (error) {
-    console.error("Payment failed:", error);
-    console.error("Error details:", error.response?.data);
-    alert("❌ Payment failed. Please try again.");
-    setPaymentStep('select');
-  }
-};
+  };
+
   const downloadPDF = (billing) => {
     const doc = new jsPDF();
     doc.setFontSize(18);
@@ -151,14 +152,12 @@ export default function Payment() {
     doc.text(`Customer: ${username || `ID: ${billing.userId}`}`, 20, 35);
     doc.text(`Vehicle: ${billing.vehicleName} (${billing.vehicleNumber})`, 20, 45);
     
-    // Use billingdate if date is null
     const displayDate = billing.date || billing.billingdate;
     if (displayDate) {
       doc.text(`Date: ${displayDate}`, 20, 55);
     }
     doc.text(`Time: ${billing.time}`, 20, 65);
 
-    // Add provider information if available
     if (billing.providerName) {
       doc.text(`Service Provider: ${billing.providerName}`, 20, 75);
     }
@@ -166,7 +165,6 @@ export default function Payment() {
     let y = 90;
     doc.text("Services:", 20, y);
     
-    // Check if services exist before mapping
     if (billing.services && billing.services.length > 0) {
       billing.services.forEach((s, i) => {
         y += 10;
@@ -186,9 +184,13 @@ export default function Payment() {
     y += 10;
     doc.text(`Total Amount: ₹${billing.totalAmount}`, 20, y);
     
-    // Add payment status
     y += 15;
     doc.text(`Payment Status: ${billing.paymentStatus || 'pending'}`, 20, y);
+
+    if (billing.paymentStatus === 'paid' && billing.paymentMethod) {
+      y += 10;
+      doc.text(`Payment Method: ${billing.paymentMethod}`, 20, y);
+    }
 
     doc.save(`Invoice_${billing.vehicleName}_${billing.date || billing.billingdate}.pdf`);
   };
@@ -265,12 +267,10 @@ export default function Payment() {
         </div>
       )}
 
-      {/* Enhanced Payment Modal with Confirmation Step */}
       {showPaymentModal && selectedBill && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white p-6 rounded-lg max-w-md w-full">
             
-            {/* Step 1: Payment Method Selection */}
             {paymentStep === 'select' && (
               <>
                 <h3 className="text-xl font-bold mb-4">Choose Payment Method</h3>
@@ -327,7 +327,6 @@ export default function Payment() {
               </>
             )}
 
-            {/* Step 2: Payment Confirmation */}
             {paymentStep === 'confirm' && (
               <>
                 <h3 className="text-xl font-bold mb-4">Confirm Payment</h3>
@@ -383,7 +382,6 @@ export default function Payment() {
               </>
             )}
 
-            {/* Step 3: Processing */}
             {paymentStep === 'processing' && (
               <div className="text-center py-4">
                 <div className="w-16 h-16 border-4 border-green-200 border-t-green-600 rounded-full animate-spin mx-auto mb-4"></div>
@@ -393,7 +391,6 @@ export default function Payment() {
               </div>
             )}
 
-            {/* Step 4: Success */}
             {paymentStep === 'success' && (
               <div className="text-center py-4">
                 <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
@@ -408,7 +405,6 @@ export default function Payment() {
               </div>
             )}
 
-            {/* Cancel button - only show in select and confirm steps */}
             {(paymentStep === 'select' || paymentStep === 'confirm') && (
               <button
                 onClick={closePaymentModal}
@@ -529,6 +525,9 @@ export default function Payment() {
                       <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
                     </svg>
                     <span>Payment Completed</span>
+                    {bill.paymentMethod && (
+                      <span className="text-xs">({bill.paymentMethod})</span>
+                    )}
                   </span>
                 )}
               </div>
