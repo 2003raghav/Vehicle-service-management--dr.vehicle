@@ -1,344 +1,511 @@
-import { useLocation, useParams, useNavigate } from "react-router-dom";
-import { useState, useEffect } from "react";
+// Customerbooking.jsx - FIXED VERSION
+import React, { useState, useEffect, useCallback } from "react";
 import axios from "axios";
-import jsPDF from "jspdf";
+import { useNavigate } from "react-router-dom";
+import { format } from "date-fns";
 
-export default function BillingPage() {
-  const { id } = useParams();
-  const location = useLocation();
+export default function CustomerBooking() {
+  const [appointments, setAppointments] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [paymentStatusMap, setPaymentStatusMap] = useState({});
+  const [processing, setProcessing] = useState({});
   const navigate = useNavigate();
-  const appointment = location.state?.appointment;
 
-  const carServices = [
-    { id: 1, name: "QuickFix Garage", service: "Oil Change", price: 800 },
-    { id: 2, name: "ProAuto Care", service: "Brake Repair", price: 1500 },
-    { id: 3, name: "Speedy Motors", service: "Battery Replacement", price: 2500 },
-    { id: 4, name: "Auto Experts", service: "Wheel Alignment", price: 1200 },
-    { id: 5, name: "City Car Care", service: "AC Service", price: 2000 },
-  ];
+  const providerName = localStorage.getItem("providerName");
+  const providerId = localStorage.getItem("providerId");
 
-  const bikeServices = [
-    { id: 101, name: "BikeCare Hub", service: "Oil Change", price: 400 },
-    { id: 102, name: "TwoWheelers Pro", service: "Brake Pad Replacement", price: 700 },
-    { id: 103, name: "MotorCycle Fix", service: "Battery Replacement", price: 1200 },
-    { id: 104, name: "Bike Masters", service: "Chain Lubrication", price: 150 },
-    { id: 105, name: "SpeedBike Garage", service: "Tyre Replacement", price: 600 },
-  ];
-
-  const [vehicleType, setVehicleType] = useState("car");
-  const [selectedServices, setSelectedServices] = useState([]);
-  const [totalAmount, setTotalAmount] = useState(0);
-  const [processing, setProcessing] = useState(false);
-  const [username, setUsername] = useState(""); // For customer username
-  const [customerId, setCustomerId] = useState(null); // Will fetch customer ID from username
-  const [providerInfo, setProviderInfo] = useState(null);
-
-  // Check if provider is logged in and get provider info
-  useEffect(() => {
-    const providerId = localStorage.getItem("providerId");
-    const providerName = localStorage.getItem("providerName");
-    
-    console.log("Provider Debug localStorage:", {
-      providerId: providerId,
-      providerName: providerName,
-      allStorage: { ...localStorage }
-    });
-    
-    if (providerId) {
-      setProviderInfo({
-        id: parseInt(providerId),
-        name: providerName
-      });
-    } else {
-      console.warn("No provider logged in");
+  const fetchAppointments = useCallback(async () => {
+    if (!providerName) {
+      setError("Provider not logged in");
+      setLoading(false);
+      return;
     }
-  }, []);
 
-  useEffect(() => {
-    const sum = selectedServices.reduce((acc, s) => acc + s.price, 0) + (selectedServices.length > 0 ? 500 : 0);
-    setTotalAmount(sum);
-  }, [selectedServices]);
-
-  // Fetch customer ID by username
-  const fetchCustomerId = async (username) => {
     try {
-      const response = await axios.get(`http://localhost:8080/api/users/${username}`);
-      if (response.data && response.data.id) {
-        setCustomerId(response.data.id);
-        return response.data.id;
+      setLoading(true);
+      console.log(`🔧 [Provider] Fetching appointments for: ${providerName}`);
+      
+      const response = await axios.get(`http://localhost:8080/appointment/owner/${providerName}`);
+      console.log(`🔧 [Provider] Appointments received:`, response.data);
+      
+      setAppointments(response.data || []);
+      
+      // Fetch payment status only if we have appointments
+      if (response.data && response.data.length > 0) {
+        await fetchPaymentStatus(response.data);
       }
-      return null;
-    } catch (error) {
-      console.error("Error fetching customer:", error);
-      return null;
+    } catch (err) {
+      console.error("Error fetching appointments:", err);
+      setError("Failed to load appointments. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  }, [providerName]);
+
+  const fetchPaymentStatus = async (appointmentsList) => {
+    try {
+      console.log(`🔧 [Provider] Fetching payment status for ${appointmentsList.length} appointments`);
+      
+      // Get all appointment IDs
+      const appointmentIds = appointmentsList.map(app => app.id).filter(id => id);
+      
+      if (appointmentIds.length === 0) return;
+
+      // Fetch billing status for each appointment
+      const statusMap = {};
+      
+      // Use Promise.all for parallel requests
+      const billingPromises = appointmentIds.map(async (id) => {
+        try {
+          const billingResponse = await axios.get(`http://localhost:8080/api/billing/appointment/${id}`);
+          if (billingResponse.data && billingResponse.data.length > 0) {
+            // Sort by creation date to get the latest billing record
+            const bills = billingResponse.data.sort((a, b) => 
+              new Date(b.createdAt || b.date) - new Date(a.createdAt || a.date)
+            );
+            const bill = bills[0]; // Get the latest bill
+            statusMap[id] = {
+              paid: bill.paymentStatus === 'paid',
+              billingId: bill.id,
+              paymentMethod: bill.paymentMethod,
+              totalAmount: bill.totalAmount,
+              hasValidAmount: bill.totalAmount > 0 // Check if amount is valid
+            };
+          } else {
+            statusMap[id] = { 
+              paid: false, 
+              billingId: null,
+              totalAmount: 0,
+              hasValidAmount: false
+            };
+          }
+        } catch (error) {
+          console.warn(`Could not fetch billing for appointment ${id}:`, error);
+          statusMap[id] = { 
+            paid: false, 
+            billingId: null,
+            totalAmount: 0,
+            hasValidAmount: false
+          };
+        }
+      });
+
+      await Promise.all(billingPromises);
+      
+      console.log(`🔧 [Provider] Payment status map:`, statusMap);
+      setPaymentStatusMap(statusMap);
+    } catch (err) {
+      console.error("Error fetching payment status:", err);
     }
   };
 
-  if (!appointment) {
+  useEffect(() => {
+    if (providerName) {
+      fetchAppointments();
+    } else {
+      setLoading(false);
+      setError("Please login as provider to view appointments");
+    }
+  }, [providerName, fetchAppointments]);
+
+  const updateAppointmentStatus = async (id, newStatus) => {
+    try {
+      setProcessing(prev => ({ ...prev, [id]: true }));
+      console.log(`🔧 [Provider] Updating appointment ${id} to status: ${newStatus}`);
+
+      await axios.put(`http://localhost:8080/appointment/${id}/status`, { status: newStatus });
+
+      // Refresh appointments list
+      await fetchAppointments();
+
+      // If status changed to "completed", DO NOT create billing automatically
+      // Let the provider create it manually through the billing page
+      if (newStatus === "completed") {
+        console.log(`🔧 [Provider] Appointment ${id} marked as completed. Billing should be created manually.`);
+      }
+
+      alert(`Appointment status updated to ${newStatus}`);
+    } catch (err) {
+      console.error("Error updating status:", err);
+      alert("Failed to update appointment status");
+    } finally {
+      setProcessing(prev => ({ ...prev, [id]: false }));
+    }
+  };
+
+  const startVideoCall = (appointment) => {
+    // Implement video call logic
+    console.log("Starting video call for appointment:", appointment.id);
+    alert("Video call feature coming soon!");
+  };
+
+  const navigateToBilling = (appointment) => {
+  const billingInfo = paymentStatusMap[appointment.id];
+  
+  if (billingInfo && billingInfo.billingId) {
+    if (billingInfo.hasValidAmount && billingInfo.totalAmount > 0) {
+      navigate(`/payment`); // View existing paid bill
+    } else {
+      navigate(`/provider/billing/${appointment.id}`, { 
+        state: { 
+          appointment,
+          existingBillingId: billingInfo.billingId
+        } 
+      });
+    }
+  } else {
+    // No billing exists, create new one with ₹500 service charge
+    navigate(`/provider/billing/${appointment.id}`, { 
+      state: { 
+        appointment,
+        serviceCharge: 500 // Explicitly pass service charge
+      } 
+    });
+  }
+};
+
+  const formatDateTime = (date, time) => {
+    try {
+      if (!date) return "Not scheduled";
+      const dateObj = new Date(date);
+      const formattedDate = format(dateObj, "MMM dd, yyyy");
+      return time ? `${formattedDate} at ${time}` : formattedDate;
+    } catch {
+      return "Invalid date";
+    }
+  };
+
+  const getStatusColor = (status) => {
+    switch (status?.toLowerCase()) {
+      case "completed":
+        return "bg-green-100 text-green-800";
+      case "confirmed":
+        return "bg-blue-100 text-blue-800";
+      case "pending":
+        return "bg-yellow-100 text-yellow-800";
+      case "cancelled":
+        return "bg-red-100 text-red-800";
+      default:
+        return "bg-gray-100 text-gray-800";
+    }
+  };
+
+  const getPaymentStatusBadge = (appointmentId) => {
+    const status = paymentStatusMap[appointmentId];
+    if (!status || !status.billingId) {
+      return (
+        <span className="ml-2 px-2 py-1 bg-gray-100 text-gray-800 text-xs font-medium rounded-full">
+          No Bill
+        </span>
+      );
+    }
+    
+    if (status.paid) {
+      return (
+        <span className="ml-2 px-2 py-1 bg-green-100 text-green-800 text-xs font-medium rounded-full">
+          Paid ₹{status.totalAmount} ({status.paymentMethod || "Unknown"})
+        </span>
+      );
+    }
+    
+    if (status.hasValidAmount && status.totalAmount > 0) {
+      return (
+        <span className="ml-2 px-2 py-1 bg-yellow-100 text-yellow-800 text-xs font-medium rounded-full">
+          Unpaid ₹{status.totalAmount}
+        </span>
+      );
+    }
+    
     return (
-      <div className="text-center py-20">
-        <p className="text-gray-500 text-lg">No appointment data found.</p>
-        <button onClick={() => navigate(-1)} className="mt-4 px-4 py-2 bg-blue-500 text-white rounded-md">
-          Go Back
-        </button>
+      <span className="ml-2 px-2 py-1 bg-red-100 text-red-800 text-xs font-medium rounded-full">
+        Bill Incomplete
+      </span>
+    );
+  };
+
+  const handleDeleteZeroAmountBilling = async (appointmentId, billingId) => {
+    if (!window.confirm("This billing record has zero amount. Delete it and create a new one?")) {
+      return;
+    }
+
+    try {
+      // Delete the zero amount billing
+      await axios.delete(`http://localhost:8080/api/billing/${billingId}`);
+      
+      // Refresh payment status
+      await fetchPaymentStatus(appointments);
+      
+      // Navigate to create new billing
+      const appointment = appointments.find(app => app.id === appointmentId);
+      if (appointment) {
+        navigate(`/provider/billing/${appointmentId}`, { state: { appointment } });
+      }
+    } catch (err) {
+      console.error("Error deleting billing:", err);
+      alert("Failed to delete billing record");
+    }
+  };
+
+  const getBillingButtonText = (appointmentId) => {
+    const status = paymentStatusMap[appointmentId];
+    
+    if (!status || !status.billingId) {
+      return "Create Bill";
+    }
+    
+    if (status.paid) {
+      return "View Paid Bill";
+    }
+    
+    if (status.hasValidAmount && status.totalAmount > 0) {
+      return "View/Edit Bill";
+    }
+    
+    return "Complete Bill";
+  };
+
+  if (!providerName) {
+    return (
+      <div className="max-w-6xl mx-auto mt-10 p-6">
+        <div className="text-center py-8 bg-red-50 rounded-lg">
+          <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+            <svg className="w-8 h-8 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+            </svg>
+          </div>
+          <h3 className="text-xl font-semibold text-red-700 mb-2">Provider Login Required</h3>
+          <p className="text-red-600 mb-4">Please login as a service provider to view customer bookings.</p>
+          <button 
+            onClick={() => navigate("/provider-login")}
+            className="px-6 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
+          >
+            Login as Provider
+          </button>
+        </div>
       </div>
     );
   }
 
-  const handleCheckboxChange = (service, checked) => {
-    if (checked) {
-      setSelectedServices(prev => [...prev, service]);
-    } else {
-      setSelectedServices(prev => prev.filter(s => s.id !== service.id));
-    }
-  };
+  if (loading) {
+    return (
+      <div className="max-w-6xl mx-auto mt-10 p-6">
+        <div className="text-center py-8">
+          <div className="w-16 h-16 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading appointments...</p>
+        </div>
+      </div>
+    );
+  }
 
-  const generatePDF = (billingData) => {
-    const doc = new jsPDF();
-    doc.setFontSize(18);
-    doc.text("Service Billing Invoice", 14, 20);
-    doc.setFontSize(12);
-    doc.text(`Customer Name: ${appointment.name}`, 14, 40);
-    doc.text(`Customer Username: ${username}`, 14, 50);
-    doc.text(`Vehicle: ${appointment.vehicleName} (${appointment.vehicleNumber})`, 14, 60);
-    doc.text(`Date: ${appointment.date}`, 14, 70);
-    doc.text(`Time: ${appointment.time}`, 14, 80);
-
-    doc.text("Services:", 14, 100);
-    selectedServices.forEach((s, index) => {
-      doc.text(`${index + 1}. ${s.service} by ${s.name} - ₹${s.price}`, 14, 110 + index * 10);
-    });
-
-    doc.text(`Service Charge: ₹500`, 14, 110 + selectedServices.length * 10 + 10);
-    doc.text(`Total Amount: ₹${totalAmount}`, 14, 110 + selectedServices.length * 10 + 20);
-
-    doc.save(`Invoice_${appointment.name}_${username}.pdf`);
-  };
-
-  const saveBillingToBackend = async () => {
-    try {
-      // Validate provider is logged in
-      if (!providerInfo) {
-        throw new Error("Provider not logged in. Please login as provider first.");
-      }
-
-      // Validate customer username is provided
-      if (!username.trim()) {
-        throw new Error("Please enter customer username.");
-      }
-
-      // Fetch customer ID
-      const customerUserId = await fetchCustomerId(username);
-      if (!customerUserId) {
-        throw new Error(`Customer with username '${username}' not found.`);
-      }
-
-      const billingData = {
-        userId: customerUserId, // This is the customer's user ID
-        vehicleName: appointment.vehicleName,
-        vehicleNumber: appointment.vehicleNumber,
-        date: appointment.date,
-        time: appointment.time,
-        totalAmount: totalAmount,
-        providerId: providerInfo.id, // Store provider who created the bill
-        providerName: providerInfo.name,
-        paymentStatus: "pending", // Default status
-        services: selectedServices.map(service => ({
-          serviceName: service.service,
-          providerName: service.name,
-          price: service.price
-        }))
-      };
-
-      console.log("Sending billing data:", billingData);
-
-      const response = await axios.post("http://localhost:8080/api/billing/create", billingData, {
-        headers: {
-          'Content-Type': 'application/json'
-        }
-      });
-
-      return response.data;
-    } catch (error) {
-      console.error("Error saving billing:", error);
-      throw error;
-    }
-  };
-
-  const handleBillingSubmit = async (e) => {
-    e.preventDefault();
-    
-    if (selectedServices.length === 0) {
-      alert("Please select at least one service before billing.");
-      return;
-    }
-
-    // Check if provider is logged in
-    if (!providerInfo) {
-      const confirmLogin = window.confirm(
-        "You need to be logged in as provider to process billing. Would you like to login as provider now?"
-      );
-      if (confirmLogin) {
-        navigate("/provider-login");
-      }
-      return;
-    }
-
-    setProcessing(true);
-
-    try {
-      // Save billing data to backend first
-      const savedBilling = await saveBillingToBackend();
-      
-      // Then generate PDF with the saved data
-      generatePDF(savedBilling);
-      
-      alert(`✅ Billing processed for ${appointment.name}. PDF downloaded and data saved!`);
-      
-      // Optionally navigate to provider dashboard
-      navigate("/provider-dashboard");
-      
-    } catch (error) {
-      if (error.message.includes("Provider not logged in")) {
-        alert("❌ Please login as provider first to process billing.");
-        navigate("/provider-login");
-      } else if (error.message.includes("customer username")) {
-        alert(`❌ ${error.message}`);
-      } else {
-        alert("❌ Failed to save billing data. Please try again.");
-        console.error("Billing error:", error);
-      }
-    } finally {
-      setProcessing(false);
-    }
-  };
-
-  const servicesList = vehicleType === "car" ? carServices : bikeServices;
+  if (error) {
+    return (
+      <div className="max-w-6xl mx-auto mt-10 p-6">
+        <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
+          <p className="text-red-700">{error}</p>
+          <button 
+            onClick={fetchAppointments}
+            className="mt-2 px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="max-w-xl mx-auto mt-10 p-6 border rounded-lg shadow">
-      <h2 className="text-2xl font-bold mb-6 text-blue-600 text-center">
-        Billing for {appointment.name}
-      </h2>
+    <div className="max-w-6xl mx-auto mt-10 p-6">
+      <div className="flex justify-between items-center mb-8">
+        <div>
+          <h2 className="text-3xl font-bold text-gray-800">Customer Bookings</h2>
+          <p className="text-gray-600 mt-1">Provider: {providerName}</p>
+        </div>
+        <button 
+          onClick={fetchAppointments}
+          className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors flex items-center space-x-2"
+        >
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+          </svg>
+          <span>Refresh</span>
+        </button>
+      </div>
 
-      {/* Provider login status indicator */}
-      {!providerInfo ? (
-        <div className="bg-red-50 border border-red-200 rounded-md p-4 mb-4">
-          <p className="text-red-700 text-sm">
-            <strong>Notice:</strong> You need to be logged in as a provider to process billing.
-          </p>
+      {appointments.length === 0 ? (
+        <div className="text-center py-12 bg-gray-50 rounded-lg">
+          <div className="w-20 h-20 bg-gray-200 rounded-full flex items-center justify-center mx-auto mb-6">
+            <svg className="w-10 h-10 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+            </svg>
+          </div>
+          <h3 className="text-xl font-semibold text-gray-700 mb-2">No Appointments Found</h3>
+          <p className="text-gray-500 mb-6">You don't have any customer appointments scheduled yet.</p>
         </div>
       ) : (
-        <div className="bg-green-50 border border-green-200 rounded-md p-4 mb-4">
-          <p className="text-green-700 text-sm">
-            <strong>Provider:</strong> Logged in as {providerInfo.name}
-          </p>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {appointments.map((appointment) => {
+            const billingInfo = paymentStatusMap[appointment.id];
+            
+            return (
+              <div key={appointment.id} className="border border-gray-200 rounded-lg p-6 bg-white shadow-sm hover:shadow-md transition-shadow">
+                <div className="flex justify-between items-start mb-4">
+                  <div>
+                    <h3 className="text-lg font-semibold text-gray-800">
+                      {appointment.name}
+                      {getPaymentStatusBadge(appointment.id)}
+                    </h3>
+                    <p className="text-gray-600 mt-1">{appointment.vehicleName} ({appointment.vehicleNumber})</p>
+                  </div>
+                  <span className={`px-3 py-1 rounded-full text-xs font-medium ${getStatusColor(appointment.status)}`}>
+                    {appointment.status || "pending"}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4 mb-6">
+                  <div>
+                    <p className="text-sm text-gray-500">Date & Time</p>
+                    <p className="font-medium">{formatDateTime(appointment.date, appointment.time)}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-500">Service Type</p>
+                    <p className="font-medium">{appointment.serviceType || "General Service"}</p>
+                  </div>
+                  {appointment.phone && (
+                    <div>
+                      <p className="text-sm text-gray-500">Phone</p>
+                      <p className="font-medium">{appointment.phone}</p>
+                    </div>
+                  )}
+                  {appointment.email && (
+                    <div>
+                      <p className="text-sm text-gray-500">Email</p>
+                      <p className="font-medium">{appointment.email}</p>
+                    </div>
+                  )}
+                </div>
+
+                {appointment.description && (
+                  <div className="mb-6">
+                    <p className="text-sm text-gray-500 mb-1">Description</p>
+                    <p className="text-gray-700 bg-gray-50 p-3 rounded">{appointment.description}</p>
+                  </div>
+                )}
+
+                <div className="flex flex-wrap gap-2 pt-4 border-t border-gray-100">
+                  {/* Status Update Buttons */}
+                  {appointment.status !== "completed" && appointment.status !== "cancelled" && (
+                    <>
+                      <button
+                        onClick={() => updateAppointmentStatus(appointment.id, "confirmed")}
+                        disabled={processing[appointment.id] || appointment.status === "confirmed"}
+                        className={`px-3 py-1.5 text-sm rounded transition-colors ${
+                          appointment.status === "confirmed"
+                            ? "bg-blue-100 text-blue-800 cursor-default"
+                            : "bg-blue-50 text-blue-600 hover:bg-blue-100"
+                        }`}
+                      >
+                        {processing[appointment.id] ? "Processing..." : "Confirm"}
+                      </button>
+                      
+                      <button
+                        onClick={() => updateAppointmentStatus(appointment.id, "completed")}
+                        disabled={processing[appointment.id]}
+                        className="px-3 py-1.5 text-sm bg-green-50 text-green-600 rounded hover:bg-green-100 transition-colors"
+                      >
+                        {processing[appointment.id] ? "Processing..." : "Mark Completed"}
+                      </button>
+                    </>
+                  )}
+
+                  {appointment.status !== "cancelled" && (
+                    <button
+                      onClick={() => updateAppointmentStatus(appointment.id, "cancelled")}
+                      disabled={processing[appointment.id]}
+                      className="px-3 py-1.5 text-sm bg-red-50 text-red-600 rounded hover:bg-red-100 transition-colors"
+                    >
+                      {processing[appointment.id] ? "Processing..." : "Cancel"}
+                    </button>
+                  )}
+
+                  {/* Video Call Button */}
+                  {appointment.status === "confirmed" && (
+                    <button
+                      onClick={() => startVideoCall(appointment)}
+                      className="px-3 py-1.5 text-sm bg-purple-50 text-purple-600 rounded hover:bg-purple-100 transition-colors"
+                    >
+                      Start Video Call
+                    </button>
+                  )}
+
+                  {/* Billing Button */}
+                  {appointment.status === "completed" && (
+                    <>
+                      <button
+                        onClick={() => navigateToBilling(appointment)}
+                        className="px-3 py-1.5 text-sm bg-orange-50 text-orange-600 rounded hover:bg-orange-100 transition-colors"
+                      >
+                        {getBillingButtonText(appointment.id)}
+                      </button>
+                      
+                      {/* Show delete option if billing exists with zero amount */}
+                      {billingInfo && billingInfo.billingId && !billingInfo.hasValidAmount && (
+                        <button
+                          onClick={() => handleDeleteZeroAmountBilling(appointment.id, billingInfo.billingId)}
+                          className="px-3 py-1.5 text-sm bg-red-50 text-red-600 rounded hover:bg-red-100 transition-colors"
+                        >
+                          Delete Zero Bill
+                        </button>
+                      )}
+                    </>
+                  )}
+
+                  {/* Reschedule Button */}
+                  {appointment.status !== "completed" && appointment.status !== "cancelled" && (
+                    <button
+                      onClick={() => navigate(`/reschedule/${appointment.id}`, { state: { appointment } })}
+                      className="px-3 py-1.5 text-sm bg-gray-50 text-gray-600 rounded hover:bg-gray-100 transition-colors"
+                    >
+                      Reschedule
+                    </button>
+                  )}
+                </div>
+                
+                {/* Debug info - show billing details */}
+                {billingInfo && billingInfo.billingId && (
+                  <div className="mt-4 pt-4 border-t border-gray-100 text-xs text-gray-500">
+                    <p>Billing ID: {billingInfo.billingId}</p>
+                    <p>Amount: ₹{billingInfo.totalAmount || 0}</p>
+                    <p>Status: {billingInfo.paid ? 'Paid' : 'Unpaid'}</p>
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
 
-      <div className="space-y-3 mb-6">
-        <p><strong>Customer Name:</strong> {appointment.name}</p>
-        <p><strong>Vehicle:</strong> {appointment.vehicleName} ({appointment.vehicleNumber})</p>
-        <p><strong>Date:</strong> {appointment.date}</p>
-        <p><strong>Time:</strong> {appointment.time}</p>
+      <div className="mt-8 p-4 bg-gray-50 rounded-lg">
+        <h4 className="font-medium text-gray-700 mb-2">Legend:</h4>
+        <div className="flex flex-wrap gap-4">
+          <div className="flex items-center">
+            <span className="w-3 h-3 bg-green-100 rounded-full mr-2"></span>
+            <span className="text-sm text-gray-600">Completed</span>
+          </div>
+          <div className="flex items-center">
+            <span className="w-3 h-3 bg-blue-100 rounded-full mr-2"></span>
+            <span className="text-sm text-gray-600">Confirmed</span>
+          </div>
+          <div className="flex items-center">
+            <span className="w-3 h-3 bg-yellow-100 rounded-full mr-2"></span>
+            <span className="text-sm text-gray-600">Pending</span>
+          </div>
+          <div className="flex items-center">
+            <span className="w-3 h-3 bg-red-100 rounded-full mr-2"></span>
+            <span className="text-sm text-gray-600">Cancelled</span>
+          </div>
+        </div>
       </div>
-
-      <form onSubmit={handleBillingSubmit} className="space-y-5">
-        {/* Customer Username Input */}
-        <div>
-          <label className="block font-medium text-gray-700 mb-2">
-            Customer Username *
-          </label>
-          <input
-            type="text"
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            placeholder="Enter customer's username"
-            className="w-full border px-4 py-2 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-            required
-          />
-          <p className="text-sm text-gray-500 mt-1">
-            Enter the username of the customer who owns this vehicle
-          </p>
-        </div>
-
-        <div>
-          <label className="block font-medium text-gray-700 mb-2">Vehicle Type</label>
-          <select
-            value={vehicleType}
-            onChange={e => { setVehicleType(e.target.value); setSelectedServices([]); }}
-            className="w-full border px-4 py-2 rounded-md"
-          >
-            <option value="car">Car</option>
-            <option value="bike">Bike</option>
-          </select>
-        </div>
-
-        <div>
-          <label className="block font-medium text-gray-700 mb-2">Select Services</label>
-          <div className="space-y-2 max-h-60 overflow-y-auto border p-2 rounded-md bg-gray-50">
-            {servicesList.map(service => (
-              <label key={service.id} className="flex items-center space-x-3">
-                <input
-                  type="checkbox"
-                  checked={selectedServices.some(s => s.id === service.id)}
-                  onChange={e => handleCheckboxChange(service, e.target.checked)}
-                  className="w-4 h-4 text-blue-600 rounded border-gray-300"
-                />
-                <span>{service.name} - {service.service} (₹{service.price})</span>
-              </label>
-            ))}
-          </div>
-        </div>
-
-        <div className="bg-yellow-50 p-4 rounded-md">
-          <p className="text-sm text-gray-600">
-            <strong>Note:</strong> A service charge of ₹500 will be added for processing.
-          </p>
-        </div>
-
-        <div>
-          <label className="block font-medium text-gray-700 mb-2">Total Amount</label>
-          <div className="space-y-1">
-            <div className="flex justify-between">
-              <span>Services:</span>
-              <span>₹{selectedServices.reduce((acc, s) => acc + s.price, 0)}</span>
-            </div>
-            <div className="flex justify-between">
-              <span>Service Charge:</span>
-              <span>₹{selectedServices.length > 0 ? 500 : 0}</span>
-            </div>
-            <div className="flex justify-between font-bold border-t pt-1">
-              <span>Total:</span>
-              <span>₹{totalAmount}</span>
-            </div>
-          </div>
-        </div>
-
-        <button
-          type="submit"
-          disabled={processing || !providerInfo || !username.trim()}
-          className={`w-full font-semibold py-2 rounded-md transition ${
-            processing || !providerInfo || !username.trim()
-              ? 'bg-gray-400 cursor-not-allowed' 
-              : 'bg-blue-600 hover:bg-blue-700 text-white'
-          }`}
-        >
-          {!providerInfo ? 'Please Login as Provider' : 
-           !username.trim() ? 'Enter Customer Username' :
-           processing ? 'Processing...' : 'Process Billing & Download PDF'}
-        </button>
-
-        {!providerInfo && (
-          <button
-            type="button"
-            onClick={() => navigate("/providerLogin")}
-            className="w-full font-semibold py-2 bg-green-600 hover:bg-green-700 text-white rounded-md transition"
-          >
-            Login as Provider
-          </button>
-        )}
-      </form>
     </div>
   );
 }

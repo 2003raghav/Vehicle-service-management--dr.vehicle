@@ -16,8 +16,6 @@ export default function CustomerBooking() {
   const [updatingStatus, setUpdatingStatus] = useState({});
   const [videoStreams, setVideoStreams] = useState({});
   const [paymentStatuses, setPaymentStatuses] = useState({});
-  const [paymentHistory, setPaymentHistory] = useState([]);
-  const [showPaymentHistory, setShowPaymentHistory] = useState(false);
   const [syncInProgress, setSyncInProgress] = useState(false);
   const [showBillingModal, setShowBillingModal] = useState(false);
   const [selectedAppointment, setSelectedAppointment] = useState(null);
@@ -27,6 +25,7 @@ export default function CustomerBooking() {
   const [debugLogs, setDebugLogs] = useState([]);
   const [showDebug, setShowDebug] = useState(false);
   const [youtubeLinks, setYoutubeLinks] = useState({});
+  const [billingInfo, setBillingInfo] = useState({}); // Store billing details
 
   const syncTimeoutRef = useRef(null);
   const navigate = useNavigate();
@@ -68,6 +67,33 @@ export default function CustomerBooking() {
     }
   };
 
+  // Get billing details for an appointment
+  const getBillingDetails = async (appointmentId) => {
+    try {
+      const { data } = await apiCall(`http://localhost:8080/api/billing/appointment/${appointmentId}`);
+      if (data && data.length > 0) {
+        // Sort by ID to get latest
+        const sortedBills = data.sort((a, b) => b.id - a.id);
+        const latestBill = sortedBills[0];
+        
+        return {
+          exists: true,
+          billingId: latestBill.id,
+          totalAmount: latestBill.totalAmount,
+          servicesTotal: latestBill.servicesTotal,
+          serviceCharge: latestBill.serviceCharge,
+          isPaid: latestBill.paymentStatus === 'paid',
+          paymentMethod: latestBill.paymentMethod,
+          billingDate: latestBill.date || latestBill.createdAt
+        };
+      }
+      return { exists: false };
+    } catch (error) {
+      console.error('Error fetching billing details:', error);
+      return { exists: false };
+    }
+  };
+
   // YouTube Video Functions
   const startVideoService = async (appointmentId) => {
     try {
@@ -79,8 +105,7 @@ export default function CustomerBooking() {
         return;
       }
 
-      // Create a unique YouTube video link for this appointment
-      const youtubeLink = `https://www.youtube.com/embed/dQw4w9WgXcQ?autoplay=1`; // Example video
+      const youtubeLink = `https://www.youtube.com/embed/o-_bW1lGafM?autoplay=1`;
       
       setVideoStreams(prev => ({
         ...prev,
@@ -100,13 +125,11 @@ export default function CustomerBooking() {
 
       setActiveVideoModal(appointmentId);
 
-      // Store the YouTube link for the customer to access
       setYoutubeLinks(prev => ({
         ...prev,
         [appointmentId]: youtubeLink
       }));
 
-      // Notify backend about video service start
       await apiCall(`http://localhost:8080/api/video/start/${appointmentId}`, {
         method: 'POST',
         data: {
@@ -131,7 +154,6 @@ export default function CustomerBooking() {
     try {
       addDebugLog(`Stopping video service for ${appointmentId}`);
       
-      // Notify backend about video service stop
       await apiCall(`http://localhost:8080/api/video/stop/${appointmentId}`, {
         method: 'POST'
       });
@@ -165,7 +187,6 @@ export default function CustomerBooking() {
     
     try {
       if (currentStream?.isPlaying) {
-        // Pause video
         setVideoStreams(prev => ({
           ...prev,
           [appointmentId]: {
@@ -179,7 +200,6 @@ export default function CustomerBooking() {
         }));
         addDebugLog(`Video paused for ${appointmentId}`);
       } else {
-        // Play video
         setVideoStreams(prev => ({
           ...prev,
           [appointmentId]: {
@@ -220,7 +240,6 @@ export default function CustomerBooking() {
           }
         }));
         
-        // Store YouTube link
         if (stream.youtubeLink) {
           setYoutubeLinks(prev => ({
             ...prev,
@@ -238,13 +257,7 @@ export default function CustomerBooking() {
     }
   };
 
-  // Check if billing already exists for an appointment
-  const checkBillingExists = async (appointmentId) => {
-    const { data, error } = await apiCall(`http://localhost:8080/api/billing/appointment/${appointmentId}`);
-    return !error && data && data.length > 0;
-  };
-
-  // Optimized Payment and appointment functions
+  // Fetch and update payment statuses
   const syncPaymentStatuses = async (appointmentsData) => {
     if (syncInProgress) return;
     
@@ -253,39 +266,23 @@ export default function CustomerBooking() {
       addDebugLog("Starting payment status synchronization...");
       
       const paymentStatusMap = {};
-      const paidAppointmentIds = new Set();
+      const billingInfoMap = {};
 
-      // Try bulk paid endpoint first
-      const { data: paidBillsData, error: paidError } = await apiCall('http://localhost:8080/api/billing/paid');
-      
-      if (!paidError && paidBillsData) {
-        const paidBills = Array.isArray(paidBillsData) ? paidBillsData : [];
-        addDebugLog("Paid bills from API:", paidBills);
-
-        paidBills.forEach(bill => {
-          if (bill.appointmentId) {
-            paidAppointmentIds.add(bill.appointmentId);
-          }
-        });
-      }
-
-      // Check each appointment
       for (const appointment of appointmentsData) {
         try {
-          let paymentStatus = 'no-billing';
-
-          if (paidAppointmentIds.has(appointment.id)) {
-            paymentStatus = 'paid';
-          } else {
-            const { data: billingData } = await apiCall(`http://localhost:8080/api/billing/appointment/${appointment.id}`);
-            const appointmentBillings = Array.isArray(billingData) ? billingData : [];
+          const billingDetails = await getBillingDetails(appointment.id);
+          
+          if (billingDetails.exists) {
+            billingInfoMap[appointment.id] = billingDetails;
             
-            if (appointmentBillings.length > 0) {
-              paymentStatus = appointmentBillings[0].paymentStatus || 'pending';
+            if (billingDetails.isPaid) {
+              paymentStatusMap[appointment.id] = 'paid';
+            } else {
+              paymentStatusMap[appointment.id] = 'pending';
             }
+          } else {
+            paymentStatusMap[appointment.id] = 'no-billing';
           }
-
-          paymentStatusMap[appointment.id] = paymentStatus;
 
         } catch (error) {
           console.warn(`Error checking payment for appointment ${appointment.id}:`, error.message);
@@ -293,16 +290,18 @@ export default function CustomerBooking() {
         }
       }
 
-      addDebugLog("Final payment status mapping:", paymentStatusMap);
+      addDebugLog("Payment status mapping:", paymentStatusMap);
+      addDebugLog("Billing info mapping:", billingInfoMap);
+      
       setPaymentStatuses(paymentStatusMap);
-      setPaymentHistory(Array.from(paidAppointmentIds).map(id => ({ appointmentId: id })));
+      setBillingInfo(billingInfoMap);
 
     } catch (error) {
       console.error("Error in payment sync:", error);
       addDebugLog("Error in payment sync:", error);
       const paymentStatusMap = {};
       appointmentsData.forEach(appointment => {
-        paymentStatusMap[appointment.id] = 'pending';
+        paymentStatusMap[appointment.id] = 'no-billing';
       });
       setPaymentStatuses(paymentStatusMap);
     } finally {
@@ -336,7 +335,6 @@ export default function CustomerBooking() {
       
       await syncPaymentStatuses(appointmentsData);
       
-      // Check video status only for in-progress appointments
       const inProgressAppointments = appointmentsData.filter(apt => apt.status === 'in-progress');
       for (const appointment of inProgressAppointments) {
         await checkVideoStatus(appointment.id);
@@ -348,40 +346,6 @@ export default function CustomerBooking() {
       setAppointments([]);
     } finally {
       setLoading(false);
-    }
-  };
-
-  const refreshAppointmentPaymentStatus = async (appointmentId) => {
-    try {
-      let finalStatus = 'no-billing';
-      
-      // Check paid endpoint first
-      const { data: paidBillsData } = await apiCall('http://localhost:8080/api/billing/paid');
-      const paidBills = Array.isArray(paidBillsData) ? paidBillsData : [];
-      const isPaid = paidBills.some(bill => bill.appointmentId === appointmentId);
-      
-      if (isPaid) {
-        finalStatus = 'paid';
-      } else {
-        // Check individual billing
-        const { data: billingData } = await apiCall(`http://localhost:8080/api/billing/appointment/${appointmentId}`);
-        const appointmentBillings = Array.isArray(billingData) ? billingData : [];
-        
-        if (appointmentBillings.length > 0) {
-          finalStatus = appointmentBillings[0].paymentStatus || 'pending';
-        }
-      }
-
-      setPaymentStatuses(prev => ({
-        ...prev,
-        [appointmentId]: finalStatus
-      }));
-
-      return finalStatus;
-      
-    } catch (error) {
-      console.error(`Error in payment refresh:`, error);
-      return 'error';
     }
   };
 
@@ -414,7 +378,7 @@ export default function CustomerBooking() {
     }
   }, [ownername, appointments.length]);
 
-  // Prevent duplicate billing creation
+  // Update appointment status
   const updateAppointmentStatus = async (appointmentId, newStatus) => {
     try {
       setUpdatingStatus(prev => ({ ...prev, [appointmentId]: true }));
@@ -441,31 +405,19 @@ export default function CustomerBooking() {
         );
         
         if (newStatus === "in-progress") {
-          // Auto-start video service when service starts
           setTimeout(() => {
             startVideoService(appointmentId);
           }, 2000);
         }
         
         if (newStatus === "completed") {
-          // Auto-stop video service when service completes
           setTimeout(() => {
             stopVideoService(appointmentId);
           }, 1000);
           
-          // Only create billing if status is completed AND no billing exists
-          const billingExists = await checkBillingExists(appointmentId);
-          if (!billingExists) {
-            await createBillingRecord(appointmentId);
-          } else {
-            addDebugLog(`Billing already exists for appointment ${appointmentId}, skipping auto-creation`);
-          }
+          addDebugLog(`Appointment ${appointmentId} completed. Billing must be created manually.`);
         }
 
-        // Refresh payment status after update
-        syncTimeoutRef.current = setTimeout(() => {
-          refreshAppointmentPaymentStatus(appointmentId);
-        }, 2000);
       } else {
         throw new Error("Failed to update status");
       }
@@ -477,9 +429,33 @@ export default function CustomerBooking() {
     }
   };
 
-  const openBillingModal = (appointment) => {
+  const openBillingModal = async (appointment) => {
     setSelectedAppointment(appointment);
     setBillingServices([]);
+    
+    // Check if billing already exists
+    const existingBilling = billingInfo[appointment.id];
+    
+    if (existingBilling && existingBilling.exists) {
+      if (existingBilling.isPaid) {
+        alert(`This appointment already has a paid bill of ${formatCurrency(existingBilling.totalAmount)}.`);
+        return;
+      }
+      
+      if (existingBilling.totalAmount > 0) {
+        const shouldEdit = window.confirm(
+          `A billing record exists with amount ${formatCurrency(existingBilling.totalAmount)}.\nDo you want to edit it?`
+        );
+        
+        if (shouldEdit) {
+          navigateToBillingPage(appointment.id, existingBilling.billingId);
+          return;
+        } else {
+          return;
+        }
+      }
+    }
+    
     setShowBillingModal(true);
   };
 
@@ -490,11 +466,21 @@ export default function CustomerBooking() {
   };
 
   const addServiceToBilling = (service) => {
-    setBillingServices(prev => [...prev, {
-      ...service,
-      quantity: 1,
-      total: service.price
-    }]);
+    const existingService = billingServices.find(s => s.id === service.id);
+    
+    if (existingService) {
+      setBillingServices(prev => prev.map(s => 
+        s.id === service.id 
+          ? { ...s, quantity: s.quantity + 1, total: s.price * (s.quantity + 1) }
+          : s
+      ));
+    } else {
+      setBillingServices(prev => [...prev, {
+        ...service,
+        quantity: 1,
+        total: service.price
+      }]);
+    }
   };
 
   const removeServiceFromBilling = (serviceId) => {
@@ -502,7 +488,10 @@ export default function CustomerBooking() {
   };
 
   const updateServiceQuantity = (serviceId, newQuantity) => {
-    if (newQuantity < 1) return;
+    if (newQuantity < 1) {
+      removeServiceFromBilling(serviceId);
+      return;
+    }
     
     setBillingServices(prev => prev.map(service => 
       service.id === serviceId 
@@ -517,8 +506,53 @@ export default function CustomerBooking() {
 
   const calculateTotalAmount = () => {
     const servicesTotal = billingServices.reduce((total, service) => total + service.total, 0);
-    const serviceCharge = 500;
+    const serviceCharge = servicesTotal > 0 ? 500 : 0;
     return servicesTotal + serviceCharge;
+  };
+
+  const navigateToBillingPage = (appointmentId, existingBillingId = null) => {
+    const appointment = appointments.find(apt => apt.id === appointmentId);
+    if (appointment) {
+      navigate(`/provider/bookings`, { 
+        state: { 
+          appointment,
+          existingBillingId: existingBillingId || billingInfo[appointmentId]?.billingId
+        } 
+      });
+    }
+  };
+
+  const navigateToCustomerPayment = (appointmentId) => {
+    const appointment = appointments.find(apt => apt.id === appointmentId);
+    if (appointment) {
+      navigate(`/payment`, { 
+        state: { 
+          appointmentId,
+          vehicleName: appointment.vehicleName,
+          vehicleNumber: appointment.vehicleNumber
+        } 
+      });
+    }
+  };
+
+  const generateInvoiceSummary = () => {
+    const servicesTotal = billingServices.reduce((total, service) => total + service.total, 0);
+    const serviceCharge = 500;
+    const total = servicesTotal + serviceCharge;
+    
+    let summary = "📋 INVOICE SUMMARY\n\n";
+    summary += "Services:\n";
+    
+    billingServices.forEach(service => {
+      summary += `• ${service.name} - ${service.quantity} × ${formatCurrency(service.price)} = ${formatCurrency(service.total)}\n`;
+    });
+    
+    summary += "\n────────────────────\n";
+    summary += `Services Total: ${formatCurrency(servicesTotal)}\n`;
+    summary += `Service Charge: ${formatCurrency(serviceCharge)}\n`;
+    summary += `Total Amount: ${formatCurrency(total)}\n`;
+    
+    return summary;
   };
 
   const createManualBilling = async () => {
@@ -528,14 +562,9 @@ export default function CustomerBooking() {
     }
 
     try {
-      const billingExists = await checkBillingExists(selectedAppointment.id);
-      if (billingExists) {
-        alert("Billing already exists for this appointment. Please check the billing records.");
-        closeBillingModal();
-        return;
-      }
-
-      const totalAmount = calculateTotalAmount();
+      const servicesTotal = billingServices.reduce((total, service) => total + service.total, 0);
+      const serviceCharge = 500; // Fixed service charge
+      const totalAmount = servicesTotal + serviceCharge;
       
       const billingData = {
         appointmentId: selectedAppointment.id,
@@ -544,6 +573,8 @@ export default function CustomerBooking() {
         vehicleNumber: selectedAppointment.vehicleNumber,
         date: selectedAppointment.date,
         time: selectedAppointment.time,
+        servicesTotal: servicesTotal,
+        serviceCharge: serviceCharge,
         totalAmount: totalAmount,
         paymentStatus: 'pending',
         providerName: ownername,
@@ -552,114 +583,74 @@ export default function CustomerBooking() {
           serviceName: service.name,
           providerName: ownername,
           price: service.price,
-          quantity: service.quantity
+          quantity: service.quantity,
+          subtotal: service.total
         }))
       };
 
-      const { error: billingError } = await apiCall(
+      const { data, error: billingError } = await apiCall(
         'http://localhost:8080/api/billing/create',
         {
           method: 'POST',
-          data: billingData
+          data: billingData,
+          headers: {
+            'Content-Type': 'application/json'
+          }
         }
       );
 
       if (!billingError) {
         closeBillingModal();
-        refreshAppointmentPaymentStatus(selectedAppointment.id);
-        alert(`Billing created successfully! Total amount: ${formatCurrency(totalAmount)} (Includes ₹500 service charge)`);
+        
+        // Update billing info locally
+        setBillingInfo(prev => ({
+          ...prev,
+          [selectedAppointment.id]: {
+            exists: true,
+            billingId: data.id,
+            totalAmount: totalAmount,
+            servicesTotal: servicesTotal,
+            serviceCharge: serviceCharge,
+            isPaid: false,
+            paymentMethod: null,
+            billingDate: new Date().toISOString()
+          }
+        }));
+        
+        // Update payment status
+        setPaymentStatuses(prev => ({
+          ...prev,
+          [selectedAppointment.id]: 'pending'
+        }));
+        
+        alert(`✅ Billing created successfully!\n\n${generateInvoiceSummary()}`);
+        
+        // Navigate to billing page for editing
+        navigateToBillingPage(selectedAppointment.id, data.id);
       } else {
         throw new Error('Failed to create billing');
       }
       
     } catch (error) {
       console.error('Error creating manual billing:', error);
-      alert('Error creating billing. Please try again.');
+      alert('❌ Error creating billing. Please try again.');
     }
   };
 
-  const createBillingRecord = async (appointmentId) => {
-    try {
-      const appointment = appointments.find(apt => apt.id === appointmentId);
-      if (!appointment) return;
-
-      const billingExists = await checkBillingExists(appointmentId);
-      if (billingExists) {
-        addDebugLog(`Billing already exists for appointment ${appointmentId}, skipping auto-creation`);
-        return;
-      }
-
-      const serviceAmount = calculateServiceAmount(appointment.serviceType);
-      const serviceCharge = 500;
-      const totalAmount = serviceAmount + serviceCharge;
-
-      const billingData = {
-        appointmentId: appointment.id,
-        userId: appointment.userId || 1,
-        vehicleName: appointment.vehicleName,
-        vehicleNumber: appointment.vehicleNumber,
-        date: appointment.date,
-        time: appointment.time,
-        totalAmount: totalAmount,
-        paymentStatus: 'pending',
-        providerName: ownername,
-        providerId: appointment.providerId || 1,
-        services: [
-          {
-            serviceName: appointment.serviceType || "General Service",
-            providerName: ownername,
-            price: serviceAmount,
-            quantity: 1
-          }
-        ]
-      };
-
-      await apiCall(
-        'http://localhost:8080/api/billing/create',
-        {
-          method: 'POST',
-          data: billingData
-        }
-      );
-
-      refreshAppointmentPaymentStatus(appointmentId);
-      
-    } catch (error) {
-      console.error('Error creating auto-billing record:', error);
+  const handleBillingAction = (appointment) => {
+    const paymentStatus = paymentStatuses[appointment.id];
+    const billingDetails = billingInfo[appointment.id];
+    
+    if (paymentStatus === 'paid') {
+      // View paid bill
+      navigateToCustomerPayment(appointment.id);
+    } else if (paymentStatus === 'pending') {
+      // View/Edit existing bill
+      navigateToBillingPage(appointment.id, billingDetails?.billingId);
+    } else {
+      // Create new bill
+      openBillingModal(appointment);
     }
-  };
-
-  const calculateServiceAmount = (serviceType) => {
-    const servicePrices = {
-      'oil change': 1500.00,
-      'tire rotation': 1200.00,
-      'brake service': 3500.00,
-      'engine diagnostic': 2500.00,
-      'general maintenance': 1800.00
-    };
-    
-    return servicePrices[serviceType?.toLowerCase()] || 2000.00;
-  };
-
-  const handleBilling = async (appointment) => {
-    const currentStatus = await refreshAppointmentPaymentStatus(appointment.id);
-    
-    if (currentStatus === 'paid') {
-      alert('This appointment has already been paid.');
-      return;
-    }
-    
-    if (currentStatus === 'no-billing') {
-      alert('No billing record found. Please complete the service first or create billing manually.');
-      return;
-    }
-    
-    navigate(`/billing/${appointment.id}`, { 
-      state: { 
-        appointment,
-        appointmentId: appointment.id
-      } 
-    });
   };
 
   const refreshAllData = async () => {
@@ -688,10 +679,6 @@ export default function CustomerBooking() {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2
     }).format(amount || 0);
-  };
-
-  const calculateTotalRevenue = () => {
-    return paymentHistory.reduce((total, payment) => total + (payment.totalAmount || 0), 0);
   };
 
   // Debug Panel Component
@@ -726,13 +713,12 @@ export default function CustomerBooking() {
   // Debug Button Component
   const DebugButton = () => (
     <button
-      onClick={() => setShowDebug(!showDebug)}
-      className={`px-3 py-2 rounded-lg flex items-center space-x-2 ${
-        showDebug ? 'bg-red-600 text-white' : 'bg-gray-600 text-white'
-      }`}
+      
+  
+     
     >
-      <Bug className="w-4 h-4" />
-      <span>Debug {showDebug ? 'ON' : 'OFF'}</span>
+      
+     
     </button>
   );
 
@@ -912,15 +898,32 @@ export default function CustomerBooking() {
 
   const getPaymentStatusBadge = (appointmentId) => {
     const status = paymentStatuses[appointmentId];
+    const billingDetails = billingInfo[appointmentId];
     
     const statusConfig = {
-      'paid': { color: 'bg-green-100 text-green-800', text: 'Paid', icon: CheckCircle },
-      'pending': { color: 'bg-yellow-100 text-yellow-800', text: 'Pending Payment', icon: Clock },
-      'no-billing': { color: 'bg-gray-100 text-gray-500', text: 'No Billing', icon: AlertCircle },
-      'error': { color: 'bg-red-100 text-red-800', text: 'Error', icon: XCircle }
+      'paid': { 
+        color: 'bg-green-100 text-green-800', 
+        text: billingDetails ? `Paid ${formatCurrency(billingDetails.totalAmount)}` : 'Paid', 
+        icon: CheckCircle 
+      },
+      'pending': { 
+        color: 'bg-yellow-100 text-yellow-800', 
+        text: billingDetails ? `Unpaid ${formatCurrency(billingDetails.totalAmount)}` : 'Pending Payment', 
+        icon: Clock 
+      },
+      'no-billing': { 
+        color: 'bg-gray-100 text-gray-500', 
+        text: 'No Bill Created', 
+        icon: AlertCircle 
+      }
     };
 
-    const config = statusConfig[status] || { color: 'bg-gray-100 text-gray-500', text: 'Unknown', icon: AlertCircle };
+    const config = statusConfig[status] || { 
+      color: 'bg-gray-100 text-gray-500', 
+      text: 'No Bill', 
+      icon: AlertCircle 
+    };
+    
     const Icon = config.icon;
     
     return (
@@ -928,6 +931,49 @@ export default function CustomerBooking() {
         <Icon className="w-3 h-3 mr-1" />
         {config.text}
       </span>
+    );
+  };
+
+  const getBillingButtonText = (appointmentId) => {
+    const status = paymentStatuses[appointmentId];
+    
+    if (status === 'paid') {
+      return "View Paid Bill";
+    }
+    
+    if (status === 'pending') {
+      return "Billing Done";
+    }
+    
+    return "Create Bill";
+  };
+
+  const renderBillingButton = (appointment) => {
+    const isCompleted = appointment.status === 'completed';
+    const paymentStatus = paymentStatuses[appointment.id];
+    
+    if (!isCompleted) return null;
+    
+    if (paymentStatus === 'paid') {
+      return (
+        <button
+         
+          className="flex items-center space-x-1 px-3 py-1 text-xs rounded bg-green-100 text-green-700 hover:bg-green-200 transition-colors"
+        >
+          <CheckCircle className="w-3 h-3" />
+          <span>Billing Done</span>
+        </button>
+      );
+    }
+    
+    return (
+      <button
+        onClick={() => handleBillingAction(appointment)}
+        className="flex items-center space-x-1 px-3 py-1 text-xs rounded bg-purple-600 text-white hover:bg-purple-700 transition-colors"
+      >
+        <CreditCard className="w-3 h-3" />
+        <span>{getBillingButtonText(appointment.id)}</span>
+      </button>
     );
   };
 
@@ -961,8 +1007,7 @@ export default function CustomerBooking() {
           <p className="text-gray-600 mt-2">Manage customer appointments and service videos</p>
         </div>
         <div className="flex space-x-3">
-        
-          
+          <DebugButton />
           <button
             onClick={refreshAllData}
             disabled={syncInProgress}
@@ -1001,7 +1046,7 @@ export default function CustomerBooking() {
           </div>
           <div className="flex items-center space-x-1">
             <AlertCircle className="w-4 h-4 text-gray-500" />
-            <span className="font-medium">No Billing:</span>
+            <span className="font-medium">No Bill:</span>
             <span className="font-bold">{Object.values(paymentStatuses).filter(status => status === 'no-billing').length}</span>
           </div>
           <div className="flex items-center space-x-1">
@@ -1011,91 +1056,6 @@ export default function CustomerBooking() {
           </div>
         </div>
       </div>
-
-      {showPaymentHistory && (
-        <div className="mb-6 bg-white rounded-lg shadow-lg p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xl font-bold text-gray-800 flex items-center">
-              <IndianRupee className="w-5 h-5 mr-2 text-green-600" />
-              Payment History
-            </h2>
-            <div className="text-right">
-              <div className="text-sm text-gray-500">
-                Total: {paymentHistory.length} paid {paymentHistory.length === 1 ? 'service' : 'services'}
-              </div>
-              <div className="text-lg font-bold text-green-700">
-                Total Revenue: {formatCurrency(calculateTotalRevenue())}
-              </div>
-            </div>
-          </div>
-
-          {paymentHistory.length === 0 ? (
-            <div className="text-center py-8 text-gray-500">
-              <IndianRupee className="w-12 h-12 mx-auto mb-3 text-gray-300" />
-              <p>No payment history found</p>
-              <p className="text-sm">Completed and paid services will appear here</p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {paymentHistory.map((payment, index) => (
-                <div key={payment.id || index} className="border border-green-200 rounded-lg p-4 bg-green-50 hover:bg-green-100 transition-colors">
-                  <div className="flex justify-between items-start mb-3">
-                    <div className="flex items-center">
-                      <Car className="w-4 h-4 mr-2 text-green-600" />
-                      <span className="font-semibold text-gray-800">
-                        {payment.vehicleName || 'Vehicle'}
-                      </span>
-                    </div>
-                    <span className="bg-green-100 text-green-800 text-xs px-2 py-1 rounded-full font-medium">
-                      Paid
-                    </span>
-                  </div>
-                  
-                  <div className="space-y-2 text-sm">
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Amount:</span>
-                      <span className="font-semibold text-green-700">
-                        {formatCurrency(payment.totalAmount)}
-                      </span>
-                    </div>
-                    
-                    {payment.vehicleNumber && (
-                      <div className="flex justify-between">
-                        <span className="text-gray-600">Plate:</span>
-                        <span className="font-mono text-gray-700">{payment.vehicleNumber}</span>
-                      </div>
-                    )}
-                    
-                    {payment.appointmentId && (
-                      <div className="flex justify-between">
-                        <span className="text-gray-600">Appointment:</span>
-                        <span className="text-gray-700">#{payment.appointmentId}</span>
-                      </div>
-                    )}
-                    
-                    {payment.paymentMethod && (
-                      <div className="flex justify-between">
-                        <span className="text-gray-600">Method:</span>
-                        <span className="text-gray-700 capitalize">{payment.paymentMethod}</span>
-                      </div>
-                    )}
-                    
-                    <div className="flex justify-between items-center pt-2 border-t border-green-200">
-                      <span className="text-gray-600 flex items-center">
-                        <Calendar className="w-3 h-3 mr-1" />
-                        Paid on:
-                      </span>
-                      <span className="text-xs text-gray-500">
-                        {formatDate(payment.paymentDate)}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
 
       {showBillingModal && selectedAppointment && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
@@ -1215,12 +1175,19 @@ export default function CustomerBooking() {
                       ))}
                       
                       <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                        <h5 className="font-semibold text-blue-800 mb-2">Billing Summary</h5>
                         <div className="space-y-2 text-sm">
                           <div className="flex justify-between">
-                            <span>Services Total:</span>
+                            <span>Services:</span>
                             <span>{formatCurrency(billingServices.reduce((total, service) => total + service.total, 0))}</span>
                           </div>
-                          <div className="flex justify-between">
+                          {billingServices.map((service, index) => (
+                            <div key={index} className="flex justify-between text-xs text-gray-600 ml-2">
+                              <span>• {service.name} (x{service.quantity})</span>
+                              <span>{formatCurrency(service.total)}</span>
+                            </div>
+                          ))}
+                          <div className="flex justify-between font-medium">
                             <span>Service Charge:</span>
                             <span>₹500.00</span>
                           </div>
@@ -1292,8 +1259,6 @@ export default function CustomerBooking() {
               <tbody className="bg-white divide-y divide-gray-200">
                 {appointments.map((appointment) => {
                   const isPaid = paymentStatuses[appointment.id] === 'paid';
-                  const hasBilling = paymentStatuses[appointment.id] !== 'no-billing';
-                  const showBillingButton = appointment.status === 'completed' && hasBilling && !isPaid;
                   
                   return (
                     <tr
@@ -1388,32 +1353,7 @@ export default function CustomerBooking() {
                             </button>
                           </div>
                           
-                          {showBillingButton && (
-                            <button
-                              onClick={() => handleBilling(appointment)}
-                              className="flex items-center space-x-1 px-3 py-1 text-xs rounded bg-purple-600 text-white hover:bg-purple-700 transition-colors"
-                            >
-                              <CreditCard className="w-3 h-3" />
-                              <span>Billing</span>
-                            </button>
-                          )}
-
-                          {appointment.status === 'completed' && !hasBilling && (
-                            <button
-                              onClick={() => openBillingModal(appointment)}
-                              className="flex items-center space-x-1 px-3 py-1 text-xs rounded bg-orange-600 text-white hover:bg-orange-700 transition-colors"
-                            >
-                              <FileText className="w-3 h-3" />
-                              <span>Create Billing</span>
-                            </button>
-                          )}
-
-                          {isPaid && (
-                            <div className="flex items-center space-x-1 px-3 py-1 text-xs rounded bg-gray-300 text-gray-500 cursor-not-allowed">
-                              <CheckCircle className="w-3 h-3" />
-                              <span>Already Paid</span>
-                            </div>
-                          )}
+                          {renderBillingButton(appointment)}
                         </div>
                       </td>
                     </tr>
@@ -1443,8 +1383,7 @@ export default function CustomerBooking() {
         </div>
       </div>
 
-      {/* Debug Panel */}
-      <DebugPanel />
+    
     </div>
   );
 }

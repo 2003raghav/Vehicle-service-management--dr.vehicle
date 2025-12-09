@@ -50,7 +50,7 @@ export default function Footer() {
 
       {/* Bottom Bar */}
       <div className="border-t border-gray-700 text-center py-4 text-sm">
-        © {new Date().getFullYear()} QnA Auto. All Rights Reserved @MVJ Boys.
+        © {new Date().getFullYear()} Quick Fix. All Rights Reserved @MVJ Boys.
       </div>
     </footer>
   );

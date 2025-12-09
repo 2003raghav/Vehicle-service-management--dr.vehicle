@@ -257,14 +257,7 @@ export default function Navbar() {
                           <User size={18} />
                           <span>My Profile</span>
                         </Link>
-                        <Link
-                          to="/settings"
-                          onClick={() => setIsProfileOpen(false)}
-                          className={`${cleanLink} flex items-center space-x-3 px-4 py-3 text-gray-700 hover:bg-blue-50 hover:text-blue-600 transition-all rounded-md mx-2`}
-                        >
-                          <Settings size={18} />
-                          <span>Settings</span>
-                        </Link>
+                        
                         <Link
                           to="/bookappointment"
                           onClick={() => setIsProfileOpen(false)}
